@@ -1,0 +1,22 @@
+{
+  "universe_usage_history": [
+    {
+      "universe": "Firefly",
+      "used_at": "2026-04-11T21:47:06.046Z",
+      "project": "YoCasts"
+    }
+  ],
+  "assignment_cast_snapshots": {
+    "yocasts-2026-04-11": {
+      "assignment_id": "yocasts-2026-04-11",
+      "universe": "Firefly",
+      "created_at": "2026-04-11T21:47:06.046Z",
+      "agents": {
+        "mal": "Lead",
+        "kaylee": "Garmin Dev",
+        "wash": "API Dev",
+        "zoe": "Tester"
+      }
+    }
+  }
+}
