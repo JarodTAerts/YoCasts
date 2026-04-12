@@ -1,4 +1,4 @@
-using Toybox.Lang;
+import Toybox.Lang;
 
 //! Mock implementation of IPodcastService with realistic data
 //! modeled after PocketCasts API response structures.

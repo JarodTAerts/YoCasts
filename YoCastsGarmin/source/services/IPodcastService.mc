@@ -1,4 +1,4 @@
-using Toybox.Lang;
+import Toybox.Lang;
 
 //! Interface contract for podcast data services.
 //! Implementations can provide mock data or real API data.

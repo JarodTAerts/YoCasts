@@ -1,7 +1,8 @@
-using Toybox.WatchUi as WatchUi;
-using Toybox.Graphics as Gfx;
-using Toybox.System as Sys;
-using Toybox.Math;
+import Toybox.Lang;
+import Toybox.WatchUi;
+import Toybox.Graphics;
+import Toybox.System;
+import Toybox.Math;
 
 //! Now Playing screen — custom View showing current episode info.
 //! Displays podcast name, episode title, progress arc, and time.
@@ -18,14 +19,14 @@ class NowPlayingView extends WatchUi.View {
         _currentPosition = (episode[DataKeys.E_PLAYED_UP_TO] as Number);
     }
 
-    function onUpdate(dc as Gfx.Dc) as Void {
+    function onUpdate(dc as Graphics.Dc) as Void {
         var width = dc.getWidth();
         var height = dc.getHeight();
         var cx = width / 2;
         var cy = height / 2;
 
         // Clear background
-        dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_BLACK);
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
 
         var duration = _episode[DataKeys.E_DURATION] as Number;
@@ -36,59 +37,59 @@ class NowPlayingView extends WatchUi.View {
         drawProgressArc(dc, cx, cy, width, height, duration);
 
         // Podcast name (top, small, gray)
-        dc.setColor(0xAAAAAA, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
         var podDisplay = podcastTitle;
         if (podDisplay.length() > 22) {
             podDisplay = podDisplay.substring(0, 19) + "...";
         }
-        dc.drawText(cx, cy - 55, Gfx.FONT_XTINY, podDisplay,
-                    Gfx.TEXT_JUSTIFY_CENTER | Gfx.TEXT_JUSTIFY_VCENTER);
+        dc.drawText(cx, cy - 55, Graphics.FONT_XTINY, podDisplay,
+                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // Episode title (center, white)
-        dc.setColor(Gfx.COLOR_WHITE, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         var epDisplay = episodeTitle;
         if (epDisplay.length() > 30) {
             epDisplay = epDisplay.substring(0, 27) + "...";
         }
-        dc.drawText(cx, cy - 15, Gfx.FONT_SMALL, epDisplay,
-                    Gfx.TEXT_JUSTIFY_CENTER | Gfx.TEXT_JUSTIFY_VCENTER);
+        dc.drawText(cx, cy - 15, Graphics.FONT_SMALL, epDisplay,
+                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // Play/Pause indicator
         if (_isPlaying) {
-            dc.setColor(Gfx.COLOR_GREEN, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy + 20, Gfx.FONT_MEDIUM, "||",
-                        Gfx.TEXT_JUSTIFY_CENTER | Gfx.TEXT_JUSTIFY_VCENTER);
+            dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx, cy + 20, Graphics.FONT_MEDIUM, "||",
+                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
         } else {
-            dc.setColor(Gfx.COLOR_BLUE, Gfx.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy + 20, Gfx.FONT_MEDIUM, ">",
-                        Gfx.TEXT_JUSTIFY_CENTER | Gfx.TEXT_JUSTIFY_VCENTER);
+            dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx, cy + 20, Graphics.FONT_MEDIUM, ">",
+                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
         }
 
         // Time display (bottom)
-        dc.setColor(0xAAAAAA, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
         var timeStr = DataFormat.formatTime(_currentPosition) + " / " + DataFormat.formatTime(duration);
-        dc.drawText(cx, cy + 55, Gfx.FONT_XTINY, timeStr,
-                    Gfx.TEXT_JUSTIFY_CENTER | Gfx.TEXT_JUSTIFY_VCENTER);
+        dc.drawText(cx, cy + 55, Graphics.FONT_XTINY, timeStr,
+                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
     //! Draw a progress arc around the edge of the screen
-    private function drawProgressArc(dc as Gfx.Dc, cx as Number, cy as Number,
+    private function drawProgressArc(dc as Graphics.Dc, cx as Number, cy as Number,
                                       width as Number, height as Number,
                                       duration as Number) as Void {
         var radius = cx - 4;
 
         // Background arc (dark gray)
-        dc.setColor(0x333333, Gfx.COLOR_TRANSPARENT);
+        dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(4);
-        dc.drawArc(cx, cy, radius, Gfx.ARC_CLOCKWISE, 90, -270);
+        dc.drawArc(cx, cy, radius, Graphics.ARC_CLOCKWISE, 90, -270);
 
         // Progress arc (blue)
         if (duration > 0 && _currentPosition > 0) {
             var progress = _currentPosition.toFloat() / duration.toFloat();
             if (progress > 1.0) { progress = 1.0; }
             var endAngle = 90 - (progress * 360.0).toNumber();
-            dc.setColor(Gfx.COLOR_BLUE, Gfx.COLOR_TRANSPARENT);
-            dc.drawArc(cx, cy, radius, Gfx.ARC_CLOCKWISE, 90, endAngle);
+            dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_TRANSPARENT);
+            dc.drawArc(cx, cy, radius, Graphics.ARC_CLOCKWISE, 90, endAngle);
         }
 
         dc.setPenWidth(1);

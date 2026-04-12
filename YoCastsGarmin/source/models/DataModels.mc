@@ -1,4 +1,4 @@
-using Toybox.Lang;
+import Toybox.Lang;
 
 //! Constants for Dictionary keys used in podcast/episode data models.
 //! Data is stored as Dictionaries (not classes) to match makeWebRequest JSON parsing

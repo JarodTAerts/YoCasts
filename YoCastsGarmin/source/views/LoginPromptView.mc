@@ -1,6 +1,7 @@
-using Toybox.WatchUi as WatchUi;
-using Toybox.Graphics as Gfx;
-using Toybox.System as Sys;
+import Toybox.Lang;
+import Toybox.WatchUi;
+import Toybox.Graphics;
+import Toybox.System;
 
 //! Login prompt shown when no PocketCasts credentials are configured.
 //! Instructs the user to enter credentials via Garmin Connect Mobile.
@@ -10,23 +11,23 @@ class LoginPromptView extends WatchUi.View {
         View.initialize();
     }
 
-    function onUpdate(dc as Gfx.Dc) as Void {
-        dc.setColor(Gfx.COLOR_BLACK, Gfx.COLOR_BLACK);
+    function onUpdate(dc as Graphics.Dc) as Void {
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
 
         var cx = dc.getWidth() / 2;
         var cy = dc.getHeight() / 2;
 
         // App name at top
-        dc.setColor(Gfx.COLOR_BLUE, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy - 60, Gfx.FONT_MEDIUM, "YoCasts",
-                    Gfx.TEXT_JUSTIFY_CENTER | Gfx.TEXT_JUSTIFY_VCENTER);
+        dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, cy - 60, Graphics.FONT_MEDIUM, "YoCasts",
+                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // Instructions
-        dc.setColor(Gfx.COLOR_LT_GRAY, Gfx.COLOR_TRANSPARENT);
-        dc.drawText(cx, cy + 10, Gfx.FONT_XTINY,
+        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(cx, cy + 10, Graphics.FONT_XTINY,
                     "Open Garmin Connect\non your phone and\nenter PocketCasts\ncredentials in settings.",
-                    Gfx.TEXT_JUSTIFY_CENTER | Gfx.TEXT_JUSTIFY_VCENTER);
+                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 }
 

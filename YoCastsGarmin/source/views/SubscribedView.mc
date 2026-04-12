@@ -1,5 +1,6 @@
-using Toybox.WatchUi as WatchUi;
-using Toybox.System as Sys;
+import Toybox.Lang;
+import Toybox.WatchUi;
+import Toybox.System;
 
 //! Subscribed Podcasts list view.
 //! Shows all podcasts the user is subscribed to via PocketCasts.

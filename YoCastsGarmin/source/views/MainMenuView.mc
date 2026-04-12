@@ -1,5 +1,6 @@
-using Toybox.WatchUi as WatchUi;
-using Toybox.System as Sys;
+import Toybox.Lang;
+import Toybox.WatchUi;
+import Toybox.System;
 
 //! Handles selection from the Home menu.
 //! Routes to Queue, Podcasts, or Now Playing screens.

@@ -1,5 +1,6 @@
-using Toybox.WatchUi as WatchUi;
-using Toybox.System as Sys;
+import Toybox.Lang;
+import Toybox.WatchUi;
+import Toybox.System;
 
 //! Episode list for a specific podcast.
 //! Shows episode titles with duration and play status.
@@ -46,7 +47,7 @@ class EpisodeListView extends WatchUi.Menu2 {
                 sub = DataFormat.formatDuration(playedUpTo) + " / " + sub;
             }
 
-            addItem(new WatchUi.MenuItem(title, sub, ep[DataKeys.E_UUID], {}));
+            addItem(new WatchUi.MenuItem(title, sub, ep[DataKeys.E_UUID] as String, {}));
         }
     }
 }

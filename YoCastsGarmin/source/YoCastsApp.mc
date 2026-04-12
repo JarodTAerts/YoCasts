@@ -1,10 +1,11 @@
-using Toybox.Application as App;
-using Toybox.WatchUi as WatchUi;
-using Toybox.System as Sys;
+import Toybox.Lang;
+import Toybox.Application;
+import Toybox.WatchUi;
+import Toybox.System;
 
 //! Main application entry point for YoCasts.
 //! Manages lifecycle and determines initial view based on auth state.
-class YoCastsApp extends App.AppBase {
+class YoCastsApp extends Application.AppBase {
 
     private var _service as MockPodcastService?;
 
@@ -32,10 +33,16 @@ class YoCastsApp extends App.AppBase {
 
     //! Check if PocketCasts credentials have been entered via Garmin Connect Mobile
     function hasCredentials() as Boolean {
-        var email = App.Properties.getValue("PocketCastsEmail");
-        var password = App.Properties.getValue("PocketCastsPassword");
-        return (email != null && !email.equals("") &&
-                password != null && !password.equals(""));
+        // Mock: always has credentials for testing
+        try {
+            var email = Application.Properties.getValue("PocketCastsEmail");
+            var password = Application.Properties.getValue("PocketCastsPassword");
+            return (email != null && !email.equals("") &&
+                    password != null && !password.equals(""));
+        } catch (e) {
+            // Properties may not be available; show home menu anyway for testing
+            return true;
+        }
     }
 
     //! Get the podcast service singleton

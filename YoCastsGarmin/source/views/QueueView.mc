@@ -1,6 +1,7 @@
-using Toybox.WatchUi as WatchUi;
-using Toybox.Graphics as Gfx;
-using Toybox.System as Sys;
+import Toybox.Lang;
+import Toybox.WatchUi;
+import Toybox.Graphics;
+import Toybox.System;
 
 //! Queue view showing the user's Up Next episodes.
 //! Uses Menu2 for scrollable list with episode title + podcast name.
@@ -40,7 +41,7 @@ class QueueView extends WatchUi.Menu2 {
                 sub = sub + " • " + DataFormat.formatDuration(duration);
             }
 
-            addItem(new WatchUi.MenuItem(title, sub, ep[DataKeys.E_UUID], {}));
+            addItem(new WatchUi.MenuItem(title, sub, ep[DataKeys.E_UUID] as String, {}));
         }
     }
 }
