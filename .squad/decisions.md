@@ -134,6 +134,103 @@ Changed `IPodcastService` from a purely synchronous interface to a hybrid **cach
 
 ---
 
+### Revert to watch-app Type — AudioContentProviderApp Crash Fix (2026-04-14)
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-04-14  
+**Status:** ⚠️ SUPERSEDED (see "Re-migrate to AudioContentProviderApp" below)  
+**Affects:** Mal (Lead), all agents
+
+Initial diagnosis: AudioContentProviderApp lifecycle incompatible with browse-only app. Reverted manifest to `watch-app` and YoCastsApp to AppBase until audio download implemented (Phase C). Media stubs preserved for future use.
+
+**Root Cause (initially suspected):**
+- `getContentDelegate()` → `getContentIterator()` → `get()` returning null caused native media player crash.
+
+**Changes Made:**
+- manifest.xml: type → watch-app
+- YoCastsApp.mc: Base → AppBase, removed provider methods
+- monkey.jungle: Excluded source/media
+
+**Prerequisites to Switch Back:**
+1. SyncDelegate must download real audio (makeWebRequest + HTTP_RESPONSE_CONTENT_TYPE_AUDIO)
+2. ContentIterator.get() must return valid ContentObj via Media.getCachedContentObj()
+3. ContentIterator.initializePlaylist() enumeration via Media.getContentRefIter()
+4. Playback config view checks for content, shows "No episodes downloaded" when empty
+
+---
+
+### Re-migrate to AudioContentProviderApp (2026-04-14)
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-04-14  
+**Affects:** Mal (Lead), Wash (API Dev), Jarod Aerts  
+**Status:** Active
+
+The earlier revert to watch-app was based on misdiagnosis. AudioContentProviderApp is the correct type; the crash was our bug, not a platform limitation.
+
+**What Was Wrong Last Time:**
+- Assumed ContentIterator.get() returning null caused crash — it doesn't. Native player shows "No Media" (expected).
+- May have kept getInitialView() overridden, which conflicts with audio provider launch flow.
+- Possible API 6.0 simulator bug (unrelated to Venu 4 target).
+
+**Current Implementation:**
+- manifest.xml: type="audio-content-provider-app"
+- YoCastsApp.mc: extends AudioContentProviderApp with all provider methods
+- getPlaybackConfigurationView() as entry point (not getInitialView())
+- ContentIterator stubs return null safely
+- Three-state auth gate: unauthenticated → LoginPromptView, authenticated → HomeMenuView
+- All views, services, models unchanged
+
+**How to Launch in Simulator:**
+1. Build: monkeyc -d venu441mm -f monkey.jungle -o bin/YoCasts.prg -l 3
+2. Start simulator: simulator.exe
+3. Deploy: monkeydo bin/YoCasts.prg venu441mm
+4. Navigate: Music Controls → Music Providers → YoCasts
+5. System calls getPlaybackConfigurationView() → HomeMenuView (or LoginPromptView if not authed)
+
+**Next Steps:**
+- Verify music provider flow in simulator
+- Implement SyncDelegate download logic (Phase C)
+- Test on Venu 4 hardware
+
+---
+
+### Dual-Build Configuration for Simulator vs Device (2026-04-14)
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-04-14  
+**Affects:** Jarod Aerts, Mal (Lead), all future Garmin builds  
+**Status:** Approved (for future use post-Phase C)
+
+The CIQ simulator cannot run `audio-content-provider-app` types, but watch-app can't play audio. Solution: dual-jungle build system with separate app entry points.
+
+**Build Configuration:**
+- **Simulator Build** (`monkey.simulator.jungle` + `manifest.simulator.xml`):
+  - Type: watch-app (AppBase)
+  - Entry: source/sim/YoCastsApp.mc
+  - Media stubs: excluded
+- **Device Build** (`monkey.jungle` + `manifest.xml`):
+  - Type: audio-content-provider-app (AudioContentProviderApp)
+  - Entry: source/app/YoCastsApp.mc
+  - Media stubs: included (source/media/)
+
+**Build Commands:**
+```bash
+# Simulator (UI development)
+monkeyc -d venu441mm -f monkey.simulator.jungle -o bin/YoCasts.prg -l 3
+
+# Device (hardware deployment)
+monkeyc -d venu441mm -f monkey.jungle -o bin/YoCasts.prg -l 3
+```
+
+**Key Implementation Detail:**
+Connect IQ `sourcePath` is recursive. Both jungle files define separate entry points in non-nested directories (source/app/ and source/sim/). Each jungle picks up only one YoCastsApp class.
+
+**Status:**
+✅ Both builds pass clean at `-l 3` strict. README updated. Ready for Phase C implementation when dual builds are needed.
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
