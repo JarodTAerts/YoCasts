@@ -1,0 +1,4 @@
+<properties>
+    <property id="PocketCastsEmail" type="string"></property>
+    <property id="PocketCastsPassword" type="string"></property>
+</properties>

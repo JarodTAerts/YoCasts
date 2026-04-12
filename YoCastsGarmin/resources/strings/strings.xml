@@ -1,0 +1,17 @@
+<strings>
+    <string id="AppName">YoCasts</string>
+    <string id="HomeMenuTitle">YoCasts</string>
+    <string id="QueueLabel">Queue</string>
+    <string id="PodcastsLabel">Podcasts</string>
+    <string id="QueueTitle">Up Next</string>
+    <string id="PodcastsTitle">Podcasts</string>
+    <string id="NowPlayingTitle">Now Playing</string>
+    <string id="EmptyQueue">Queue is empty</string>
+    <string id="EmptyPodcasts">No subscriptions</string>
+    <string id="EmptyEpisodes">No episodes</string>
+    <string id="LoginPrompt">Sign in via\nGarmin Connect</string>
+    <string id="LoginInstructions">Open Garmin Connect on\nyour phone and enter\nyour PocketCasts\ncredentials in\nYoCasts settings.</string>
+    <string id="Loading">Loading...</string>
+    <string id="Paused">Paused</string>
+    <string id="Playing">Playing</string>
+</strings>

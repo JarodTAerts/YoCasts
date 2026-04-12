@@ -1,0 +1,8 @@
+<settings>
+    <setting propertyKey="@Properties.PocketCastsEmail" title="PocketCasts Email">
+        <settingConfig type="alphaNumeric"/>
+    </setting>
+    <setting propertyKey="@Properties.PocketCastsPassword" title="PocketCasts Password">
+        <settingConfig type="alphaNumeric"/>
+    </setting>
+</settings>
