@@ -59,6 +59,40 @@ Clear blueprint for the Garmin Connect IQ watch app with decision rationale.
 
 ---
 
+### Offline Mode & Sync Reconciliation Architecture (2026-04-12)
+
+**By:** Mal (Lead)  
+**Date:** 2026-04-12  
+**Affects:** Kaylee (Garmin Dev), Wash (API Dev)  
+**Document:** `docs/offline-sync-design.md`
+
+Comprehensive offline mode and sync reconciliation architecture for YoCasts.
+
+**Key Decisions:**
+1. **"Furthest position wins"** — Playback conflicts resolved by `max(localPos, serverPos)`. Status hierarchy: COMPLETED > IN_PROGRESS > NOT_PLAYED. Completed is terminal.
+2. **Structured changelog** — All offline mutations in `Application.Storage` key `"changelog"`, per-episode coalescing, cleared only after confirmed server push.
+3. **Queue reconciliation** — Server order is base. Local completions remove episodes. Phone-side additions merged. Server wins for removals.
+4. **Authority split** — Server authoritative for metadata/subscriptions. Watch participates in playback resolution via max().
+5. **Push-then-pull sync** — 7-step idempotent state machine: auth → read changelog → fetch server → reconcile → push → refresh caches → cleanup.
+6. **Four-phase implementation** — (1) Metadata caching, (2) Position tracking + sync, (3) Audio download via Media module, (4) Full reconciliation. Audio download elevated from Phase 5 to Phase 3.
+
+**Open Questions:**
+- Garmin Media module API specifics — Kaylee needs to prototype ContentProvider/SyncDelegate.
+- Exact Application.Storage limit on Venu 4 41mm — needs hardware testing.
+- Whether `/user/in_progress` supports bulk reconciliation.
+
+---
+
+### User Directive: Always Use Best Models (2026-04-12)
+
+**By:** Jarod Aerts  
+**Date:** 2026-04-12  
+**Affects:** All agents
+
+All agents should always be started with Claude Opus 4.6 or better — always use the best models available.
+
+---
+
 ### Garmin UX Spec Established
 
 **Author:** Kaylee (Garmin Dev)  

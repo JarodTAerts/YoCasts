@@ -45,4 +45,12 @@
 - The furgoose/Pocket-Casts repo is legacy — uses old `play.pocketcasts.com/users/sign_in` cookie-based auth, completely different from the current API. Not useful for modern auth reference.
 - Decision proposed in `.squad/decisions/inbox/wash-token-auth.md`: Use proactive token refresh strategy with `/user/login_pocket_casts` + `/user/token`. Updated `docs/pocketcasts-api-reference.md` with corrected auth documentation.
 - **Cross-team device sync (2026-04-12):** Kaylee finalized Venu 4 41mm targeting. Updated manifest.xml (single device venu441mm, SDK 4.2.0), monkey.jungle (build target), and garmin-ux-spec.md (390×390 AMOLED, 768 KB memory, touch + 2 buttons). No more multi-device lowest-common-denominator — focused targeting eliminates 128 KB memory constraint, enables richer auth flow with token caching and rotation. Architecture can now assume generous token storage in Application.Storage.
+- **Cross-team update (2026-04-12):** Mal designed offline mode & sync reconciliation architecture (`docs/offline-sync-design.md`). **Impacts to API dev:**
+  1. **Sync protocol needs API validation** — 7-step push-then-pull flow uses `/sync/update_episode` for pushing playback state and `/user/in_progress` for server state. Need to verify if `/user/in_progress` returns enough data for bulk reconciliation or if per-episode fetches are required.
+  2. **Audio download elevated to Phase 3** — API must support episode audio URL retrieval for Garmin Media download.
+  3. **Changelog replay on sync** — offline mutations pushed to server via existing API endpoints. Coalesced per-episode (only latest position update kept).
+  4. **Conflict resolution is "furthest position wins"** — `max(localPos, serverPos)`. API layer doesn't need to resolve conflicts; service layer handles it.
+- **Cross-team update (2026-04-12):** Kaylee replaced Menu2 home screen with fully custom `HomeMenuView`. **Impacts to API dev:**
+  1. **Dynamic subtitle data** — Home screen now shows episode count for Queue and subscription count for Podcasts. API service methods must return these counts or full lists for counting.
+  2. **Now Playing metadata** — Home screen embeds episode title, podcast name, progress, and elapsed/total time in a 124px pill. API must supply this data efficiently (single call preferred).
 
