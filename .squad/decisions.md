@@ -113,6 +113,27 @@ Complete Garmin Connect IQ UX design with 7 screens and memory budgets.
 - Audio playback: stream vs download? (Biggest unresolved architecture question)
 - Proxy hosting location and auth token management
 
+### Async Service Interface with Cache + Sync Getters (2026-04-12)
+
+**By:** Wash (API Dev)  
+**Date:** 2026-04-12  
+**Affects:** Kaylee (Garmin Dev), Mal (Lead)
+
+Changed `IPodcastService` from a purely synchronous interface to a hybrid **cache-first + async fetch** pattern to support `Communications.makeWebRequest()` (which is inherently async on Garmin).
+
+**What Changed:**
+1. **5 new methods on IPodcastService:** `isAuthenticated()`, `isDataReady()`, `hasEpisodesForPodcast(uuid)`, `fetchAll()`, `requestEpisodesForPodcast(uuid)`.
+2. **Original 4 sync getters unchanged** — `getSubscribedPodcasts()`, `getEpisodesForPodcast(uuid)`, `getQueue()`, `getNowPlaying()` return cached data (empty array if not yet loaded).
+3. **All view type annotations changed** from `MockPodcastService` to `IPodcastService` — views are now service-implementation-agnostic.
+
+**Why This Design:** `makeWebRequest()` is async but Menu2 builds items in constructor and can't update after. Cache-first hybrid lets MockPodcastService work unchanged (data pre-loaded), PocketCastsPodcastService fetch in background and call `requestUpdate()`, and views call sync getters as usual.
+
+**Open Questions:**
+- Episode list shows "Loading..." on first visit with real API — needs view swap mechanism (Phase 2 polish).
+- Token refresh doesn't queue original request during refresh — acceptable for v1 (1hr token lifetime).
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus

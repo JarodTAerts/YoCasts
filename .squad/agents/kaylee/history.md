@@ -51,6 +51,12 @@
   Also added physical button support (UP/DOWN to cycle items with selection highlight, SELECT to activate) alongside touch. Build passes strict (-l 3). `MainMenuView.mc` (old Menu2 delegate) left in place as dead code — can be cleaned up later.
 - **Learned:** `fillPolygon()` in Monkey C takes untyped array literals `[[x1,y1],[x2,y2],[x3,y3]]` — do NOT add `as Array<Array<Number>>` type cast; SDK expects tuple type `Array[Numeric, Numeric]` which differs from `Array<Number>`. Let the compiler infer the type.
 - **Learned:** For custom views replacing Menu2 on Garmin, return `[View, BehaviorDelegate]` from `getInitialView()` instead of `[Menu2, Menu2InputDelegate]`. Use `onTap(ClickEvent)` on BehaviorDelegate for touch handling with `getCoordinates()` for hit testing.
+- **Cross-team update (2026-04-12):** Wash built real `PocketCastsPodcastService` implementing `IPodcastService`. **Impacts to Garmin dev:**
+  1. **IPodcastService interface expanded** — 5 new methods: `isAuthenticated()`, `isDataReady()`, `hasEpisodesForPodcast(uuid)`, `fetchAll()`, `requestEpisodesForPodcast(uuid)`. Original 4 sync getters unchanged. MockPodcastService has no-op stubs for new methods.
+  2. **All view type annotations now `IPodcastService`** — Views are service-implementation-agnostic. No code changes needed when switching mock ↔ real.
+  3. **Service toggle via `useMockData` property** — Set in Garmin Connect Mobile settings alongside email/password. Controls which service implementation is active.
+  4. **Episode list loading UX gap** — Real API fetches episodes on-demand per podcast. Menu2 can't dynamically add items post-construction, so episode list shows "Loading..." on first visit. User must back out and re-enter. Needs view swap mechanism in future polish pass.
+  5. **Auth uses `/user/login_pocket_casts`** — Full OAuth2 flow with accessToken + refreshToken + expiresIn. Proactive refresh before API calls. Fallback to re-login on failure.
 - **Cross-team update (2026-04-12):** Mal designed offline mode & sync reconciliation architecture (`docs/offline-sync-design.md`). **Impacts to Garmin dev:**
   1. **All Views need offline-aware updates** — connectivity check, offline indicator, gray-out logic for unavailable content.
   2. **Audio download elevated to Phase 3** — no longer a stretch goal. Must prototype `Media.ContentProvider`/`SyncDelegate` for download management.

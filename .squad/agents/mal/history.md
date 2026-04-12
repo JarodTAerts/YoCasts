@@ -37,3 +37,11 @@
   2. **Dynamic data in home menu** — Subtitles show episode count, subscription count, and Now Playing metadata. Service interface may need lightweight summary methods alongside full list fetches.
   3. **Audio download elevated to Phase 3** — confirmed by offline sync design. Architecture build phases updated accordingly.
 
+- **Cross-team update (2026-04-12):** Wash built real `PocketCastsPodcastService` (13 files, 1083 lines). **Impacts to architecture:**
+  1. **IPodcastService interface expanded** — 5 new async-aware methods added: `isAuthenticated()`, `isDataReady()`, `hasEpisodesForPodcast(uuid)`, `fetchAll()`, `requestEpisodesForPodcast(uuid)`. Sync getters unchanged — return cached data or empty arrays.
+  2. **Cache-first + async fetch pattern validated** — `makeWebRequest()` callbacks populate cache, then `requestUpdate()` triggers view redraws. MockPodcastService works unchanged (data pre-loaded, `isDataReady()` always true).
+  3. **Service toggle via `useMockData` property** — Runtime switch between mock and real service. Enables regression testing without live API.
+  4. **Auth resolved** — `/user/login_pocket_casts` for full OAuth2 tokens. Proactive refresh before API calls. Fallback to re-login on 401.
+  5. **On-demand episode fetch** — Episodes loaded per-podcast when user navigates, not bulk at startup. Offline sync layer can build on top of this caching.
+  6. **Known gap: Menu2 episode list loading** — Can't dynamically add items post-construction. First visit shows "Loading...", requires back-and-re-enter. Future polish needed.
+
