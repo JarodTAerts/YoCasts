@@ -1,0 +1,17 @@
+squad: document Kaylee garmin build milestone and merge decisions
+
+- Orchestration log: Kaylee completed YoCastsGarmin/ scaffold (17 files, ~900 LOC)
+  5 screens (Home, Queue, Podcasts, Episodes, Now Playing), Menu2 nav,
+  IPodcastService interface + MockPodcastService, settings-based auth
+
+- Session log: Garmin app build summary (brief)
+
+- Decisions merge: Moved Kaylee's garmin-mvp-scaffolding decision from inbox
+  to main decisions.md. Deleted inbox file.
+
+- Cross-team history updates:
+  - Wash: Appended Kaylee sync note confirming data contract validation
+  - Mal: Appended scaffolding sync confirming service interface ready
+  - Kaylee: Already documented in learnings
+
+Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>

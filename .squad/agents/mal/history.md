@@ -28,3 +28,5 @@
   3. **Token refresh is broken** — `POST /user/token` returns 400. Store credentials on companion phone and re-login if token expires. This affects auth module design.
   4. **Search requires Bearer auth** — `POST /discover/search` returns 401 without token. If discover feature uses search, ensure bearer token is attached.
   5. **Stats values are strings** — `/user/stats/summary` time values are strings, parse to numbers. Minor but affects data coercion in stats module.
+
+- **Kaylee scaffolding sync (2026-04-12):** Kaylee built Garmin app with IPodcastService interface + MockPodcastService. Data models use Dictionary instances (matches architecture decision). Mock queue uses simple array; real PocketCastsService will normalize API's map structure in `getQueue()` method. This validates the architectural data contract — service interface is ready for implementation.

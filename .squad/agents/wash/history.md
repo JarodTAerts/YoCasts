@@ -39,3 +39,4 @@
   - User has Plus subscription (paid: 1, tier: "Plus"), gift plan expiring 2118
   - Fixed example credentials file — restored placeholders, created proper `appsettings.local.json`
 - **Response data saved:** 24 JSON files in `test-results/` covering all tested endpoints with real response data for schema reference.
+- **Kaylee implementation sync (2026-04-12):** Kaylee completed Garmin app scaffold with IPodcastService interface + MockPodcastService. Mock data normalizes queue to simple array (real API returns map) — service layer will handle conversion. All Dictionary models use PocketCasts API field names, ready for drop-in service replacement. This confirms data contract between teams and validates API surface assumptions.
