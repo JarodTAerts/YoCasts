@@ -2,6 +2,27 @@
 
 ## Active Decisions
 
+### Live PocketCasts API Schema Validated (2026-04-12)
+
+**By:** Wash (API Dev)  
+**Date:** 2026-04-12  
+**Affects:** Mal (Lead), Kaylee (Garmin Dev)
+
+Executed comprehensive live API testing: 25 endpoints tested, 20 confirmed working, 5 failed. All responses captured for reference.
+
+**Critical Findings for Garmin App:**
+1. **Up Next is a map, not array** — `/up_next/list` returns `{ order: [...], episodes: {...} }`. Episodes field is dictionary keyed by UUID. Garmin code must iterate order and lookup UUIDs.
+2. **Episode metadata gaps** — `/user/podcast/episodes` omits titles, URLs, dates. Only returns status fields (playingStatus, playedUpTo, starred, duration, isDeleted). Full metadata requires per-episode `POST /user/episode` call or bulk fetch from `podcast-api.pocketcasts.com`.
+3. **Token refresh broken** — `POST /user/token` returns 400. Workaround: re-login with credentials if token expires.
+4. **Search requires auth** — `POST /discover/search` returns 401 without Bearer token.
+5. **Stats are strings** — `/user/stats/summary` time values are strings, not numbers. Parse accordingly.
+
+**Confirmed Working:** Login, podcast list, episodes, episode detail, new releases, in progress, starred, history, up next, bookmarks, stats, subscription, search, recommend episodes, podcast recs, social recs, podcast full metadata, featured, trending, categories, discover.
+
+**Failed:** Token refresh (400), named settings (404), user profile (404), files list (404), user filters (404), user_podcast recs (404).
+
+---
+
 ### PocketCasts API Surface Documented
 
 **By:** Wash (API Dev)  

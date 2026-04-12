@@ -27,3 +27,15 @@
 - **Interactive menu (2026-04-11):** Test tool now presents numbered menu for testing individual endpoints or running full suite. All tests are read-only. Responses saved to `test-results/` as timestamped JSON with request metadata (method, URL, redacted auth token).
 - **API reference testing section updated:** Docs now show local settings setup flow as primary credential method.
 - **Interactive menu & response logging (2026-04-11):** Rebuilt test runner with numbered menu (15 endpoints + full suite option). All operations read-only. Response logging to `test-results/` includes request metadata and timestamps for audit trail and debugging.
+- **Live API testing (2026-04-11):** Ran full read-only exploration against real PocketCasts API with user credentials. 20/25 endpoints confirmed working, 5 returned errors (404 or 400). Key findings:
+  - `/discover/search` now **requires auth** (401 without Bearer token) — docs previously said "No auth required"
+  - `/user/podcast/episodes` returns **minimal schema** (no title/url/published) — need `/user/episode` for full details or `podcast-api.pocketcasts.com/podcast/full/{uuid}`
+  - `/up_next/list` uses a **map/dictionary keyed by episode UUID** (not an array) with separate `order` array
+  - `/user/token` (token refresh) returns 400 — may be deprecated or need different request format
+  - `/user/named_settings/fetch` returns 404 — endpoint removed
+  - Stats values are **strings, not numbers** (all times in seconds as strings)
+  - Subscription status schema is much richer than documented — includes `tier`, `features`, `subscriptions[]` array, `web` pricing info
+  - `total` field present in episode list responses (`new_releases`, `in_progress`, `starred`, `history`)
+  - User has Plus subscription (paid: 1, tier: "Plus"), gift plan expiring 2118
+  - Fixed example credentials file — restored placeholders, created proper `appsettings.local.json`
+- **Response data saved:** 24 JSON files in `test-results/` covering all tested endpoints with real response data for schema reference.

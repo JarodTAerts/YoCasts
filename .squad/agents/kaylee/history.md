@@ -22,3 +22,9 @@
 - Proposed file structure uses View+Delegate pairs per screen (e.g., `QueueView.mc` + `QueueDelegate.mc`).
 - Key open question: Garmin audio playback (Media module) — need to determine stream vs download strategy. Impacts companion architecture.
 - **Cross-team update (2026-04-11):** Wash discovered real queue is `/up_next/list` and playback sync is `/sync/update_episode` — these are the exact endpoints the UX targets. Mal's architecture patterns (Menu2, Dictionary models, LRU cache) are compatible with these API endpoints. All three teams aligned on API surface now.
+- **Cross-team update (2026-04-12):** Wash completed live API validation (25 endpoints, 20 working). **Critical impacts to UI/UX:**
+  1. **Up Next queue is a dictionary, not a list** — `/up_next/list` returns `{ order: [...], episodes: {uuid: {...}} }`. Queue screen must loop over `order` array and lookup titles/metadata from `episodes` dictionary. Update QueueDelegate to bind this structure correctly.
+  2. **Episode titles missing from podcast list** — `/user/podcast/episodes` returns ONLY status (playingStatus, playedUpTo, starred, duration). NO titles. If Episodes screen needs titles (it does for UX), must fetch them separately via `POST /user/episode` per episode or bulk `podcast-api.pocketcasts.com`. This breaks the current assumption that `/user/podcast/episodes` is the source of truth for episode metadata. Episode list UX will need a loading state or multi-call strategy.
+  3. **Token refresh broken** — `POST /user/token` returns 400. Credentials must be stored on companion and re-login used if session expires. Update auth flow assumptions.
+  4. **Search requires Bearer token** — `POST /discover/search` returns 401 without token. If discover feature uses search, ensure token is passed.
+  5. **Stats values are strings** — `/user/stats/summary` returns string time values, not numbers. Any stats display must parse these.

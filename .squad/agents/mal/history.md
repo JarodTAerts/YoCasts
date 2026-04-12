@@ -22,3 +22,9 @@
 - The Tizen app's `DownloadService.cs` handles episode audio download — this is explicitly deferred to Phase 5 (stretch) on Garmin due to complexity and memory constraints.
 - The `Origin: https://playbeta.pocketcasts.com` header is required on PocketCasts API requests (see accessor code).
 - **Cross-team update (2026-04-11):** Wash discovered the real queue endpoints are `/up_next/*`, not `/user/new_releases`. Playback sync uses `/sync/update_episode`. This resolves a critical API surface question — the endpoints our service module will use are now fully documented in `docs/pocketcasts-api-reference.md`. Kaylee's UX directly targets these endpoints.
+- **Cross-team update (2026-04-12):** Wash completed live API validation (25 endpoints, 20 working). **Critical impacts to architecture:**
+  1. **Up Next queue structure is a map, not array** — `/up_next/list` returns `{ order: [...], episodes: {uuid: {...}} }`. Queue view must iterate `order` array and lookup each UUID in `episodes` dictionary. Update PocketCastsService to expose this structure correctly.
+  2. **Episode metadata gaps** — `/user/podcast/episodes` returns ONLY status fields (playingStatus, playedUpTo, starred, duration, isDeleted), NO titles/URLs/dates. If podcast view needs titles, must call `POST /user/episode` per-episode or use `podcast-api.pocketcasts.com` bulk endpoint. This impacts episode list cache strategy.
+  3. **Token refresh is broken** — `POST /user/token` returns 400. Store credentials on companion phone and re-login if token expires. This affects auth module design.
+  4. **Search requires Bearer auth** — `POST /discover/search` returns 401 without token. If discover feature uses search, ensure bearer token is attached.
+  5. **Stats values are strings** — `/user/stats/summary` time values are strings, parse to numbers. Minor but affects data coercion in stats module.
