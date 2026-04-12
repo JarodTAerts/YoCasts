@@ -1,4 +1,5 @@
 import Toybox.Lang;
+import Toybox.Graphics;
 
 //! Constants for Dictionary keys used in podcast/episode data models.
 //! Data is stored as Dictionaries (not classes) to match makeWebRequest JSON parsing
@@ -56,5 +57,36 @@ module DataFormat {
         var secs = seconds % 60;
         var secsStr = secs < 10 ? "0" + secs.toString() : secs.toString();
         return mins.toString() + ":" + secsStr;
+    }
+
+    //! Truncate text to fit within maxWidth pixels, appending "..." if needed.
+    //! Uses binary search for efficiency on long strings.
+    function truncateText(dc as Graphics.Dc, text as String, font as Graphics.FontDefinition, maxWidth as Number) as String {
+        if (dc.getTextWidthInPixels(text, font) <= maxWidth) {
+            return text;
+        }
+        var ellipsis = "...";
+        var ellipsisW = dc.getTextWidthInPixels(ellipsis, font);
+        var availW = maxWidth - ellipsisW;
+        if (availW <= 0) {
+            return ellipsis;
+        }
+        var lo = 1;
+        var hi = text.length() - 1;
+        var best = 0;
+        while (lo <= hi) {
+            var mid = (lo + hi) / 2;
+            var sub = text.substring(0, mid) as String;
+            if (dc.getTextWidthInPixels(sub, font) <= availW) {
+                best = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+        if (best == 0) {
+            return ellipsis;
+        }
+        return (text.substring(0, best) as String) + ellipsis;
     }
 }

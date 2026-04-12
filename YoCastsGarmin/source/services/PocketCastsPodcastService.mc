@@ -137,7 +137,7 @@ class PocketCastsPodcastService extends IPodcastService {
     }
 
     //! @hide (public only because makeWebRequest requires it)
-    function onLoginResponse(responseCode as Number, data) as Void {
+    function onLoginResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
         if (responseCode == 200 && data != null && data instanceof Dictionary) {
             var dict = data as Dictionary;
             _accessToken = dict.get("accessToken") as String;
@@ -180,7 +180,7 @@ class PocketCastsPodcastService extends IPodcastService {
     }
 
     //! @hide
-    function onRefreshResponse(responseCode as Number, data) as Void {
+    function onRefreshResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
         if (responseCode == 200 && data != null && data instanceof Dictionary) {
             var dict = data as Dictionary;
             _accessToken = dict.get("accessToken") as String;
@@ -203,7 +203,7 @@ class PocketCastsPodcastService extends IPodcastService {
     }
 
     //! @hide
-    function onPodcastsResponse(responseCode as Number, data) as Void {
+    function onPodcastsResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
         if (responseCode == 200 && data != null && data instanceof Dictionary) {
             var dict = data as Dictionary;
             var raw = dict.get("podcasts");
@@ -249,7 +249,7 @@ class PocketCastsPodcastService extends IPodcastService {
     }
 
     //! @hide
-    function onQueueResponse(responseCode as Number, data) as Void {
+    function onQueueResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
         if (responseCode == 200 && data != null && data instanceof Dictionary) {
             var dict = data as Dictionary;
             var order = dict.get("order");
@@ -320,7 +320,7 @@ class PocketCastsPodcastService extends IPodcastService {
     }
 
     //! @hide
-    function onQueueEnrichResponse(responseCode as Number, data) as Void {
+    function onQueueEnrichResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
         if (responseCode == 200 && data != null && data instanceof Dictionary) {
             var d = data as Dictionary;
             if (_queueEnrichIndex < _queue.size()) {
@@ -361,7 +361,7 @@ class PocketCastsPodcastService extends IPodcastService {
     // ================================================================
 
     //! @hide
-    function onEpisodeListResponse(responseCode as Number, data) as Void {
+    function onEpisodeListResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
         if (responseCode == 200 && data != null && data instanceof Dictionary) {
             var dict = data as Dictionary;
             var raw = dict.get("episodes");
@@ -403,7 +403,7 @@ class PocketCastsPodcastService extends IPodcastService {
     }
 
     //! @hide
-    function onEpisodeDetailResponse(responseCode as Number, data) as Void {
+    function onEpisodeDetailResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
         if (responseCode == 200 && data != null && data instanceof Dictionary) {
             var d = data as Dictionary;
             var userState = _pendingEpUserState[_pendingEpIndex] as Dictionary;
@@ -429,8 +429,8 @@ class PocketCastsPodcastService extends IPodcastService {
     // ================================================================
 
     //! Make an authenticated POST request with Bearer token
-    private function _makeAuthPost(path as String, body as Dictionary,
-                                    callback as Method) as Void {
+    private function _makeAuthPost(path as String, body as Dictionary<Object, Object>,
+                                    callback as Method(responseCode as Number, data as Dictionary or String or Null) as Void) as Void {
         // Proactive token refresh
         if (_isTokenExpiringSoon()) {
             _doTokenRefresh();
@@ -463,7 +463,7 @@ class PocketCastsPodcastService extends IPodcastService {
     }
 
     //! Safe string extraction — returns fallback if value is null
-    private function _strOr(val, fallback as String) as String {
+    private function _strOr(val as Object?, fallback as String) as String {
         if (val != null && val instanceof String) {
             return val as String;
         }

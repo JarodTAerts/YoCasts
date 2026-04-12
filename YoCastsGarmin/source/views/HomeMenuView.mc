@@ -3,71 +3,95 @@ import Toybox.WatchUi;
 import Toybox.Graphics;
 import Toybox.System;
 
-//! Custom home menu view replacing Menu2 for full layout control.
-//! Renders 3 centered pills: Queue, Podcasts, and an enhanced Now Playing.
-//! All items are centered, properly margined for 390px round AMOLED.
+//! Custom home menu with scrolling, proper spacing, and pixel-based text truncation.
+//! Three scrollable pills: Queue, Podcasts, Now Playing.
+//! Supports touch tap, swipe (via onNextPage/onPreviousPage), and button navigation.
+//! Scroll offset is applied to all drawing and hit detection.
 class HomeMenuView extends WatchUi.View {
 
     private var _service as IPodcastService;
     private var _isPlaying as Boolean = false;
     private var _selectedIndex as Number = 0;
+    private var _scrollOffset as Number = 0;
 
-    // Layout positions (computed in onUpdate for screen-size independence)
-    private var _queueY as Number = 0;
-    private var _podcastsY as Number = 0;
-    private var _npY as Number = 0;
+    // Cached screen Y positions (updated each onUpdate for hit testing)
+    private var _queueScreenY as Number = 0;
+    private var _podScreenY as Number = 0;
+    private var _npScreenY as Number = 0;
     private var _playBtnCx as Number = 0;
     private var _playBtnCy as Number = 0;
+
+    // Layout metrics
+    private var _pillH as Number = 72;
+    private var _npH as Number = 140;
+    private var _gap as Number = 20;
+    private var _margin as Number = 42;
+    private var _viewportTop as Number = 65;
+    private var _viewportH as Number = 290;
+    private var _contentHeight as Number = 0;
+    private var _maxScroll as Number = 0;
 
     function initialize(service as IPodcastService) {
         View.initialize();
         _service = service;
+        // Content: Queue + gap + Podcasts + gap + NP + bottom padding
+        _contentHeight = _pillH + _gap + _pillH + _gap + _npH + 15;
+        _maxScroll = _contentHeight - _viewportH;
+        if (_maxScroll < 0) { _maxScroll = 0; }
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
         var w = dc.getWidth();
-        var h = dc.getHeight();
         var cx = w / 2;
-
-        // Margins and sizes
-        var margin = 30;
-        var pillW = w - margin * 2;
-        var pillH = 68;
-        var npH = 124;
-        var pillR = 14;
-        var gap = 6;
+        var pillW = w - _margin * 2;
+        var pillR = 16;
 
         // Clear to black (AMOLED)
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
 
-        // --- Title ---
+        // --- Fixed title area (above scroll viewport) ---
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, 38, Graphics.FONT_MEDIUM, "YoCasts",
+        dc.drawText(cx, 33, Graphics.FONT_MEDIUM, "YoCasts",
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-
-        // Thin accent line under title
         dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
-        dc.drawLine(cx - 40, 58, cx + 40, 58);
+        dc.drawLine(cx - 40, 53, cx + 40, 53);
 
-        // --- Compute vertical positions ---
-        _queueY = 68;
-        _podcastsY = _queueY + pillH + gap;
-        _npY = _podcastsY + pillH + gap;
+        // --- Compute screen positions from logical layout + scroll ---
+        _queueScreenY = _viewportTop - _scrollOffset;
+        _podScreenY = _queueScreenY + _pillH + _gap;
+        _npScreenY = _podScreenY + _pillH + _gap;
 
-        // --- Queue Pill ---
-        drawPillBg(dc, margin, _queueY, pillW, pillH, pillR, _selectedIndex == 0);
-        drawQueueContent(dc, margin, _queueY, pillW, pillH, cx);
+        // --- Clip drawing to the scroll viewport ---
+        dc.setClip(0, _viewportTop, w, _viewportH);
 
-        // --- Podcasts Pill ---
-        drawPillBg(dc, margin, _podcastsY, pillW, pillH, pillR, _selectedIndex == 1);
-        drawPodcastsContent(dc, margin, _podcastsY, pillW, pillH, cx);
+        // Queue pill (only draw if visible)
+        if (_queueScreenY + _pillH > _viewportTop && _queueScreenY < _viewportTop + _viewportH) {
+            drawPillBg(dc, _margin, _queueScreenY, pillW, _pillH, pillR, _selectedIndex == 0);
+            drawQueueContent(dc, _margin, _queueScreenY, pillW, _pillH, cx);
+        }
 
-        // --- Now Playing Pill (enhanced) ---
-        drawNowPlayingPill(dc, margin, _npY, pillW, npH, pillR, cx);
+        // Podcasts pill
+        if (_podScreenY + _pillH > _viewportTop && _podScreenY < _viewportTop + _viewportH) {
+            drawPillBg(dc, _margin, _podScreenY, pillW, _pillH, pillR, _selectedIndex == 1);
+            drawPodcastsContent(dc, _margin, _podScreenY, pillW, _pillH, cx);
+        }
+
+        // Now Playing pill
+        if (_npScreenY + _npH > _viewportTop && _npScreenY < _viewportTop + _viewportH) {
+            drawNowPlayingPill(dc, _margin, _npScreenY, pillW, _npH, pillR, cx);
+        }
+
+        dc.clearClip();
+
+        // Scroll indicator (outside clip region)
+        if (_maxScroll > 0) {
+            drawScrollIndicator(dc, w);
+        }
     }
 
-    //! Draw a rounded-rect pill background
+    // --- Pill Background ---
+
     private function drawPillBg(dc as Graphics.Dc, x as Number, y as Number,
                                  w as Number, h as Number, r as Number,
                                  selected as Boolean) as Void {
@@ -86,57 +110,56 @@ class HomeMenuView extends WatchUi.View {
         }
     }
 
-    //! Draw Queue item content with music note icon and subtitle
+    // --- Queue Content ---
+
     private function drawQueueContent(dc as Graphics.Dc, x as Number, y as Number,
                                        w as Number, h as Number, cx as Number) as Void {
         var queue = _service.getQueue();
         var count = queue.size();
 
-        // Music note icon on the left
-        var iconX = x + 30;
+        var iconX = x + 28;
         var iconY = y + h / 2;
         drawMusicNote(dc, iconX, iconY);
 
-        // Title centered
+        var textX = cx + 8;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx + 8, y + h / 2 - 11, Graphics.FONT_SMALL, "Queue",
+        dc.drawText(textX, y + h / 2 - 12, Graphics.FONT_SMALL, "Queue",
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Subtitle with count
         dc.setColor(0x999999, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx + 8, y + h / 2 + 13, Graphics.FONT_XTINY,
+        dc.drawText(textX, y + h / 2 + 14, Graphics.FONT_XTINY,
                     count.toString() + " episodes",
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    //! Draw Podcasts item content with headphone icon and subtitle
+    // --- Podcasts Content ---
+
     private function drawPodcastsContent(dc as Graphics.Dc, x as Number, y as Number,
                                           w as Number, h as Number, cx as Number) as Void {
         var podcasts = _service.getSubscribedPodcasts();
         var count = podcasts.size();
 
-        // Headphone icon on the left
-        var iconX = x + 30;
+        var iconX = x + 28;
         var iconY = y + h / 2;
         drawHeadphones(dc, iconX, iconY);
 
-        // Title centered
+        var textX = cx + 8;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx + 8, y + h / 2 - 11, Graphics.FONT_SMALL, "Podcasts",
+        dc.drawText(textX, y + h / 2 - 12, Graphics.FONT_SMALL, "Podcasts",
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Subtitle with count
         dc.setColor(0x999999, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx + 8, y + h / 2 + 13, Graphics.FONT_XTINY,
+        dc.drawText(textX, y + h / 2 + 14, Graphics.FONT_XTINY,
                     count.toString() + " subscriptions",
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    //! Draw the enhanced Now Playing pill with play/pause, progress bar, and time
+    // --- Now Playing Pill ---
+
     private function drawNowPlayingPill(dc as Graphics.Dc, x as Number, y as Number,
                                          w as Number, h as Number, r as Number,
                                          cx as Number) as Void {
-        // Distinct background
+        // Distinct darker background
         if (_selectedIndex == 2) {
             dc.setColor(0x1C2541, Graphics.COLOR_TRANSPARENT);
         } else {
@@ -150,6 +173,14 @@ class HomeMenuView extends WatchUi.View {
         dc.drawLine(x + r, y, x + w - r, y);
         dc.setPenWidth(1);
 
+        // Selection border
+        if (_selectedIndex == 2) {
+            dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawRoundedRectangle(x, y, w, h, r);
+            dc.setPenWidth(1);
+        }
+
         var ep = _service.getNowPlaying();
         if (ep == null) {
             dc.setColor(0x666666, Graphics.COLOR_TRANSPARENT);
@@ -162,31 +193,29 @@ class HomeMenuView extends WatchUi.View {
         var podTitle = ep[DataKeys.E_PODCAST_TITLE] as String;
         var duration = ep[DataKeys.E_DURATION] as Number;
         var playedUpTo = ep[DataKeys.E_PLAYED_UP_TO] as Number;
+        var maxTextW = w - 30;
 
-        // "Now Playing" label
+        // "NOW PLAYING" label
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, y + 14, Graphics.FONT_XTINY, "NOW PLAYING",
+        dc.drawText(cx, y + 15, Graphics.FONT_XTINY, "NOW PLAYING",
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Episode title (truncate if too long)
+        // Episode title (pixel-truncated)
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        var epDisplay = epTitle;
-        if (epDisplay.length() > 26) {
-            epDisplay = epDisplay.substring(0, 23) as String;
-            epDisplay = epDisplay + "...";
-        }
-        dc.drawText(cx, y + 36, Graphics.FONT_SMALL, epDisplay,
+        var epDisplay = DataFormat.truncateText(dc, epTitle, Graphics.FONT_SMALL, maxTextW);
+        dc.drawText(cx, y + 40, Graphics.FONT_SMALL, epDisplay,
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Podcast title
+        // Podcast name (pixel-truncated)
         dc.setColor(0x777777, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, y + 56, Graphics.FONT_XTINY, podTitle,
+        var podDisplay = DataFormat.truncateText(dc, podTitle, Graphics.FONT_XTINY, maxTextW);
+        dc.drawText(cx, y + 62, Graphics.FONT_XTINY, podDisplay,
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
         // Progress bar
         var barX = x + 20;
         var barW = w - 40;
-        var barY = y + 72;
+        var barY = y + 82;
         var barH = 4;
 
         dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
@@ -204,20 +233,17 @@ class HomeMenuView extends WatchUi.View {
 
         // Play/Pause button circle
         var btnR = 16;
-        _playBtnCx = cx - 55;
-        _playBtnCy = y + 98;
+        _playBtnCx = cx - 50;
+        _playBtnCy = y + 110;
 
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(_playBtnCx, _playBtnCy, btnR);
 
-        // Draw play triangle or pause bars inside the button
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
         if (_isPlaying) {
-            // Pause: two vertical bars
             dc.fillRectangle(_playBtnCx - 6, _playBtnCy - 7, 4, 14);
             dc.fillRectangle(_playBtnCx + 2, _playBtnCy - 7, 4, 14);
         } else {
-            // Play: right-pointing triangle
             var pts = [[_playBtnCx - 5, _playBtnCy - 8],
                        [_playBtnCx - 5, _playBtnCy + 8],
                        [_playBtnCx + 8, _playBtnCy]];
@@ -231,85 +257,125 @@ class HomeMenuView extends WatchUi.View {
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
+    // --- Scroll Indicator ---
+
+    private function drawScrollIndicator(dc as Graphics.Dc, w as Number) as Void {
+        var trackH = _viewportH - 20;
+        var trackTop = _viewportTop + 10;
+        var trackX = w - 8;
+
+        dc.setColor(0x222222, Graphics.COLOR_TRANSPARENT);
+        dc.fillRoundedRectangle(trackX, trackTop, 4, trackH, 2);
+
+        var thumbH = 20;
+        var thumbRange = trackH - thumbH;
+        var thumbY = trackTop;
+        if (_maxScroll > 0) {
+            thumbY = trackTop + ((_scrollOffset.toFloat() / _maxScroll.toFloat()) * thumbRange).toNumber();
+        }
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        dc.fillRoundedRectangle(trackX, thumbY, 4, thumbH, 2);
+    }
+
     // --- Icon Drawing Helpers ---
 
-    //! Draw a music note icon (filled circle + stem + flag)
     private function drawMusicNote(dc as Graphics.Dc, x as Number, y as Number) as Void {
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        // Note head
         dc.fillCircle(x, y + 4, 5);
-        // Stem
         dc.setPenWidth(2);
         dc.drawLine(x + 5, y + 4, x + 5, y - 10);
-        // Flag
         dc.drawLine(x + 5, y - 10, x + 10, y - 6);
         dc.setPenWidth(1);
     }
 
-    //! Draw a headphone icon (arc + ear cups)
     private function drawHeadphones(dc as Graphics.Dc, x as Number, y as Number) as Void {
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(2);
-        // Headband arc
         dc.drawArc(x + 8, y + 2, 10, Graphics.ARC_CLOCKWISE, 190, 350);
-        // Left ear cup
         dc.fillRoundedRectangle(x - 3, y, 6, 12, 2);
-        // Right ear cup
         dc.fillRoundedRectangle(x + 13, y, 6, 12, 2);
         dc.setPenWidth(1);
     }
 
     // --- Public API ---
 
-    //! Toggle mock playback state
     function togglePlayPause() as Void {
         _isPlaying = !_isPlaying;
         WatchUi.requestUpdate();
     }
 
-    //! Get currently selected item index
     function getSelectedIndex() as Number {
         return _selectedIndex;
     }
 
-    //! Move selection up
+    //! Select previous item and auto-scroll to keep it visible
     function selectPrevious() as Void {
         _selectedIndex = _selectedIndex - 1;
-        if (_selectedIndex < 0) {
-            _selectedIndex = 2;
-        }
+        if (_selectedIndex < 0) { _selectedIndex = 2; }
+        _ensureSelectedVisible();
         WatchUi.requestUpdate();
     }
 
-    //! Move selection down
+    //! Select next item and auto-scroll to keep it visible
     function selectNext() as Void {
         _selectedIndex = _selectedIndex + 1;
-        if (_selectedIndex > 2) {
-            _selectedIndex = 0;
-        }
+        if (_selectedIndex > 2) { _selectedIndex = 0; }
+        _ensureSelectedVisible();
         WatchUi.requestUpdate();
     }
 
-    //! Hit-test a tap coordinate against menu items
+    //! Adjust scroll offset so the selected item is fully within the viewport
+    private function _ensureSelectedVisible() as Void {
+        var logY = 0;
+        var itemH = _pillH;
+        if (_selectedIndex == 0) {
+            logY = 0;
+        } else if (_selectedIndex == 1) {
+            logY = _pillH + _gap;
+        } else {
+            logY = _pillH + _gap + _pillH + _gap;
+            itemH = _npH;
+        }
+        // If item top is above viewport
+        if (logY < _scrollOffset) {
+            _scrollOffset = logY;
+        }
+        // If item bottom is below viewport
+        if (logY + itemH > _scrollOffset + _viewportH) {
+            _scrollOffset = logY + itemH - _viewportH;
+        }
+        _clampScroll();
+    }
+
+    private function _clampScroll() as Void {
+        if (_scrollOffset < 0) { _scrollOffset = 0; }
+        if (_scrollOffset > _maxScroll) { _scrollOffset = _maxScroll; }
+    }
+
+    //! Hit-test a tap against menu items using cached screen positions.
+    //! Screen positions already incorporate scrollOffset from last draw.
     //! Returns: 0=queue, 1=podcasts, 2=nowPlaying, 3=playPauseBtn, -1=miss
     function hitTest(tapX as Number, tapY as Number) as Number {
         var w = System.getDeviceSettings().screenWidth;
-        var margin = 30;
-        var pillH = 68;
-        var npH = 124;
 
-        if (tapX < margin || tapX > w - margin) {
+        // Must be within viewport vertically
+        if (tapY < _viewportTop || tapY > _viewportTop + _viewportH) {
+            return -1;
+        }
+        // Must be within horizontal bounds (allow a bit of bezel tolerance)
+        if (tapX < 25 || tapX > w - 25) {
             return -1;
         }
 
-        if (tapY >= _queueY && tapY < _queueY + pillH) {
+        // Check against screen positions set during onUpdate
+        if (tapY >= _queueScreenY && tapY < _queueScreenY + _pillH) {
             return 0;
         }
-        if (tapY >= _podcastsY && tapY < _podcastsY + pillH) {
+        if (tapY >= _podScreenY && tapY < _podScreenY + _pillH) {
             return 1;
         }
-        if (tapY >= _npY && tapY < _npY + npH) {
-            // Check play/pause button area (generous 24px radius hit zone)
+        if (tapY >= _npScreenY && tapY < _npScreenY + _npH) {
+            // Play/pause button (generous 24px hit radius)
             var dx = tapX - _playBtnCx;
             var dy = tapY - _playBtnCy;
             if (dx * dx + dy * dy <= 24 * 24) {
@@ -328,6 +394,7 @@ class HomeMenuView extends WatchUi.View {
 
 //! Input delegate for the custom home menu.
 //! Handles taps on pills, play/pause button, and physical button navigation.
+//! Swipe up/down (onNextPage/onPreviousPage) selects items and auto-scrolls.
 class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
 
     private var _view as HomeMenuView;
@@ -339,7 +406,6 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
         _service = service;
     }
 
-    //! Handle tap events with hit testing
     function onTap(evt as WatchUi.ClickEvent) as Boolean {
         var coords = evt.getCoordinates();
         var tapX = coords[0] as Number;
@@ -364,7 +430,6 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
         return false;
     }
 
-    //! SELECT button activates the currently highlighted item
     function onSelect() as Boolean {
         var idx = _view.getSelectedIndex();
         if (idx == 0) {
@@ -377,13 +442,13 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
         return true;
     }
 
-    //! DOWN = next item
+    //! DOWN button / swipe up = select next + auto-scroll
     function onNextPage() as Boolean {
         _view.selectNext();
         return true;
     }
 
-    //! UP = previous item
+    //! UP button / swipe down = select previous + auto-scroll
     function onPreviousPage() as Boolean {
         _view.selectPrevious();
         return true;

@@ -36,33 +36,44 @@ class NowPlayingView extends WatchUi.View {
         // Draw progress arc around screen edge
         drawProgressArc(dc, cx, cy, width, height, duration);
 
-        // Podcast name (top, small, gray)
+        // Podcast name (top, small, gray — pixel-truncated)
         dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
-        var podDisplay = podcastTitle;
-        if (podDisplay.length() > 22) {
-            podDisplay = podDisplay.substring(0, 19) + "...";
-        }
+        var maxTextW = width - 60;
+        var podDisplay = DataFormat.truncateText(dc, podcastTitle, Graphics.FONT_XTINY, maxTextW);
         dc.drawText(cx, cy - 55, Graphics.FONT_XTINY, podDisplay,
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Episode title (center, white)
+        // Episode title (center, white — pixel-truncated)
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        var epDisplay = episodeTitle;
-        if (epDisplay.length() > 30) {
-            epDisplay = epDisplay.substring(0, 27) + "...";
-        }
+        var epDisplay = DataFormat.truncateText(dc, episodeTitle, Graphics.FONT_SMALL, maxTextW);
         dc.drawText(cx, cy - 15, Graphics.FONT_SMALL, epDisplay,
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
-        // Play/Pause indicator
+        // Play/Pause indicator — drawn with Graphics shapes
+        var btnCx = cx;
+        var btnCy = cy + 20;
+        var btnR = 18;
+
+        // Button circle background
         if (_isPlaying) {
             dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy + 20, Graphics.FONT_MEDIUM, "||",
-                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
         } else {
-            dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy + 20, Graphics.FONT_MEDIUM, ">",
-                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+            dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        }
+        dc.fillCircle(btnCx, btnCy, btnR);
+
+        // Icon inside button
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
+        if (_isPlaying) {
+            // Pause: two vertical bars
+            dc.fillRectangle(btnCx - 7, btnCy - 8, 5, 16);
+            dc.fillRectangle(btnCx + 2, btnCy - 8, 5, 16);
+        } else {
+            // Play: right-pointing triangle
+            var pts = [[btnCx - 6, btnCy - 10],
+                       [btnCx - 6, btnCy + 10],
+                       [btnCx + 10, btnCy]];
+            dc.fillPolygon(pts);
         }
 
         // Time display (bottom)
