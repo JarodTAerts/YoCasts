@@ -141,10 +141,14 @@ module CacheManager {
         return -1;
     }
 
-    //! Wipe all cached data from Application.Storage.
-    //! Safe in Phase 1 — auth lives in Application.Properties, not Storage.
-    //! Will need revision when changelog/auth tokens move to Storage (Phase 2+).
+    //! Wipe cached podcast data but preserve changelog, auth, and sync state.
+    //! Selectively deletes known cache keys instead of clearValues() to
+    //! protect ChangeLog entries and future auth token storage.
     function clearCache() as Void {
-        Application.Storage.clearValues();
+        Application.Storage.deleteValue(KEY_PODCASTS);
+        Application.Storage.deleteValue(KEY_QUEUE);
+        // Per-podcast episode caches (KEY_EPISODES_PREFIX + uuid) are not
+        // tracked centrally — they will be overwritten on next fetch.
+        // Per-episode position caches are left intact for sync.
     }
 }

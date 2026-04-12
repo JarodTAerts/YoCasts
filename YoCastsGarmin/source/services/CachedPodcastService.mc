@@ -78,16 +78,22 @@ class CachedPodcastService extends IPodcastService {
     // IPodcastService — async triggers
     // ================================================================
 
-    //! Start full data fetch. When offline, no-op (cached data is served).
+    //! Start full data fetch. Connectivity-aware:
+    //!   STATE_WIFI:    full refresh (all data + future downloads)
+    //!   STATE_PHONE:   metadata refresh (small payloads only)
+    //!   STATE_OFFLINE: serve cache only, no-op
     function fetchAll() as Void {
-        if (_isConnected()) {
-            System.println("YoCasts: CachedService — connected, delegating fetchAll");
-            _podcastsRefreshPending = true;
-            _queueRefreshPending = true;
-            _wrapped.fetchAll();
-        } else {
+        var state = ConnectivityManager.getState();
+        if (state == ConnectivityManager.STATE_OFFLINE) {
             System.println("YoCasts: CachedService — offline, serving cached data only");
+            return;
         }
+
+        System.println("YoCasts: CachedService — connected (state=" + state + "), delegating fetchAll");
+        _podcastsRefreshPending = true;
+        _queueRefreshPending = true;
+        _wrapped.fetchAll();
+        // Future phases: STATE_WIFI triggers episode auto-downloads
     }
 
     //! Fetch episodes for a podcast. Loads from cache first; if connected
@@ -189,9 +195,9 @@ class CachedPodcastService extends IPodcastService {
     // Helpers
     // ================================================================
 
-    //! Check if any connection is available (phone BLE or direct Wi-Fi).
+    //! Check if any connectivity is available (Wi-Fi direct or phone BLE).
+    //! Delegates to ConnectivityManager for unified three-state detection.
     private function _isConnected() as Boolean {
-        var settings = System.getDeviceSettings();
-        return settings.phoneConnected || settings.connectionAvailable;
+        return ConnectivityManager.isConnected();
     }
 }
