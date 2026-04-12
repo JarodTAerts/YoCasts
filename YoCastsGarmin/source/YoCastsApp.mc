@@ -42,6 +42,16 @@ class YoCastsApp extends Application.AppBase {
     function onStop(state) {
     }
 
+    //! Called when settings are changed via Garmin Connect Mobile or simulator.
+    //! Recreates the service with new credentials and refreshes the view.
+    function onSettingsChanged() as Void {
+        System.println("YoCasts: settings changed, recreating service");
+        _service = createService();
+        var svc = _service as IPodcastService;
+        svc.fetchAll();
+        WatchUi.requestUpdate();
+    }
+
     //! Check if PocketCasts credentials have been entered via Garmin Connect Mobile
     function hasCredentials() as Boolean {
         try {
@@ -68,13 +78,15 @@ class YoCastsApp extends Application.AppBase {
     }
 
     //! Create the appropriate service based on settings.
-    //! Falls back to mock if credentials are missing or useMockData is true.
+    //! Real API mode wraps PocketCastsPodcastService in CachedPodcastService
+    //! for transparent offline caching. Mock mode skips caching.
     private function createService() as IPodcastService {
         if (!shouldUseMockData() && hasCredentials()) {
             try {
                 var email = Application.Properties.getValue("PocketCastsEmail") as String;
                 var password = Application.Properties.getValue("PocketCastsPassword") as String;
-                return new PocketCastsPodcastService(email, password);
+                var realService = new PocketCastsPodcastService(email, password);
+                return new CachedPodcastService(realService);
             } catch (e) {
                 System.println("YoCasts: failed to create real service, using mock");
             }

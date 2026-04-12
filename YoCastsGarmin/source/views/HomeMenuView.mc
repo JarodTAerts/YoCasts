@@ -18,12 +18,14 @@ class HomeMenuView extends WatchUi.View {
     private var _queueScreenY as Number = 0;
     private var _podScreenY as Number = 0;
     private var _npScreenY as Number = 0;
+    private var _settingsScreenY as Number = 0;
     private var _playBtnCx as Number = 0;
     private var _playBtnCy as Number = 0;
 
     // Layout metrics for 390x390 round AMOLED
     private var _pillH as Number = 68;
     private var _npH as Number = 105;
+    private var _settingsH as Number = 52;
     private var _gap as Number = 14;
     private var _margin as Number = 28;
     private var _viewportTop as Number = 55;
@@ -48,7 +50,7 @@ class HomeMenuView extends WatchUi.View {
     function initialize(service as IPodcastService) {
         View.initialize();
         _service = service;
-        _contentHeight = _pillH + _gap + _pillH + _gap + _npH + 15;
+        _contentHeight = _pillH + _gap + _pillH + _gap + _npH + _gap + _settingsH + 15;
         _maxScroll = _contentHeight - _viewportH;
         if (_maxScroll < 0) { _maxScroll = 0; }
     }
@@ -142,6 +144,7 @@ class HomeMenuView extends WatchUi.View {
         _queueScreenY = _viewportTop - _scrollOffset;
         _podScreenY = _queueScreenY + _pillH + _gap;
         _npScreenY = _podScreenY + _pillH + _gap;
+        _settingsScreenY = _npScreenY + _npH + _gap;
 
         // Clip to scroll viewport
         dc.setClip(0, _viewportTop, w, _viewportH);
@@ -161,6 +164,11 @@ class HomeMenuView extends WatchUi.View {
         // Now Playing pill
         if (_npScreenY + _npH > _viewportTop && _npScreenY < _viewportTop + _viewportH) {
             drawNowPlayingPill(dc, _margin, _npScreenY, pillW, _npH, _pillR, cx, w);
+        }
+
+        // Settings pill
+        if (_settingsScreenY + _settingsH > _viewportTop && _settingsScreenY < _viewportTop + _viewportH) {
+            drawSettingsPill(dc, _margin, _settingsScreenY, pillW, _settingsH, _pillR, cx);
         }
 
         dc.clearClip();
@@ -383,6 +391,38 @@ class HomeMenuView extends WatchUi.View {
         dc.setPenWidth(1);
     }
 
+    //! Draw a simple gear/cog icon for settings
+    private function drawGearIcon(dc as Graphics.Dc, x as Number, y as Number) as Void {
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(x + 8, y, 7);
+        dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(x + 8, y, 3);
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        // Gear teeth (4 small rectangles at cardinal directions)
+        dc.fillRectangle(x + 6, y - 10, 4, 5);
+        dc.fillRectangle(x + 6, y + 5, 4, 5);
+        dc.fillRectangle(x - 2, y - 2, 5, 4);
+        dc.fillRectangle(x + 13, y - 2, 5, 4);
+    }
+
+    // --- Settings Pill ---
+
+    private function drawSettingsPill(dc as Graphics.Dc, x as Number, y as Number,
+                                      w as Number, h as Number, r as Number,
+                                      cx as Number) as Void {
+        dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
+        dc.fillRoundedRectangle(x, y, w, h, r);
+
+        var iconX = x + 20;
+        var iconY = y + h / 2;
+        drawGearIcon(dc, iconX, iconY);
+
+        var textX = cx + 8;
+        dc.setColor(0xBBBBBB, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(textX, y + h / 2, Graphics.FONT_SMALL, "Settings",
+                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
     // --- Public API ---
 
     function togglePlayPause() as Void {
@@ -404,7 +444,7 @@ class HomeMenuView extends WatchUi.View {
         WatchUi.requestUpdate();
     }
 
-    //! Hit-test a tap. Returns: 0=queue, 1=podcasts, 2=NP, 3=playBtn, -1=miss
+    //! Hit-test a tap. Returns: 0=queue, 1=podcasts, 2=NP, 3=playBtn, 4=settings, -1=miss
     function hitTest(tapX as Number, tapY as Number) as Number {
         var w = System.getDeviceSettings().screenWidth;
 
@@ -429,6 +469,9 @@ class HomeMenuView extends WatchUi.View {
             }
             return 2;
         }
+        if (tapY >= _settingsScreenY && tapY < _settingsScreenY + _settingsH) {
+            return 4;
+        }
 
         return -1;
     }
@@ -448,7 +491,7 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
     private var _view as HomeMenuView;
     private var _service as IPodcastService;
     // Tracks which item the physical button SELECT activates.
-    // Cycles via KEY_UP/KEY_DOWN. 0=Queue, 1=Podcasts, 2=NowPlaying.
+    // Cycles via KEY_UP/KEY_DOWN. 0=Queue, 1=Podcasts, 2=NowPlaying, 3=Settings.
     private var _selectedIndex as Number = 0;
 
     function initialize(view as HomeMenuView, service as IPodcastService) {
@@ -476,6 +519,9 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
             return true;
         } else if (hit == 3) {
             _view.togglePlayPause();
+            return true;
+        } else if (hit == 4) {
+            navigateToSettings();
             return true;
         }
 
@@ -508,7 +554,7 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
         // DOWN — cycle selected index forward
         if (key == WatchUi.KEY_DOWN) {
             _selectedIndex = _selectedIndex + 1;
-            if (_selectedIndex > 2) { _selectedIndex = 0; }
+            if (_selectedIndex > 3) { _selectedIndex = 0; }
             _view.scrollDown();
             return true;
         }
@@ -516,7 +562,7 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
         // UP — cycle selected index backward
         if (key == WatchUi.KEY_UP) {
             _selectedIndex = _selectedIndex - 1;
-            if (_selectedIndex < 0) { _selectedIndex = 2; }
+            if (_selectedIndex < 0) { _selectedIndex = 3; }
             _view.scrollUp();
             return true;
         }
@@ -535,8 +581,10 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
             navigateToQueue();
         } else if (index == 1) {
             navigateToPodcasts();
-        } else {
+        } else if (index == 2) {
             navigateToNowPlaying();
+        } else {
+            navigateToSettings();
         }
     }
 
@@ -558,5 +606,10 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
             npDelegate.setView(npView);
             WatchUi.pushView(npView, npDelegate, WatchUi.SLIDE_UP);
         }
+    }
+
+    private function navigateToSettings() as Void {
+        var settingsView = new SettingsView();
+        WatchUi.pushView(settingsView, new SettingsDelegate(settingsView), WatchUi.SLIDE_UP);
     }
 }
