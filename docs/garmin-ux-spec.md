@@ -1,10 +1,11 @@
 # YoCasts — Garmin Connect IQ UX Specification
 
-> **Version:** 1.1  
+> **Version:** 2.0  
 > **Author:** Kaylee (Garmin Dev)  
-> **Date:** 2026-04-13 (updated)  
+> **Date:** 2026-04-14 (updated)  
 > **Status:** Active  
-> **See also:** [`garmin-layout-reference.md`](garmin-layout-reference.md) — pixel-perfect layout specs, geometry tables, font measurements, and touch target specs for all screens
+> **See also:** [`garmin-layout-reference.md`](garmin-layout-reference.md) — pixel-perfect layout specs, geometry tables, font measurements, and touch target specs for all screens  
+> **v2.0 changes:** Corrected connectivity model — watch makes direct HTTP requests over Wi-Fi and BT (no phone-only proxy). Rewrote Home Menu to split-dock design (scrollable pills + fixed Now Playing dock). Added Settings screen. Updated navigation flow, data architecture, and companion app section to reflect actual implementation.
 
 ---
 
@@ -16,7 +17,7 @@
 4. [Data Requirements Per Screen](#4-data-requirements-per-screen)
 5. [Garmin Connect IQ UI Patterns](#5-garmin-connect-iq-ui-patterns)
 6. [Resource Constraints](#6-resource-constraints)
-7. [Companion App Requirements](#7-companion-app-requirements)
+7. [Communication & Connectivity](#7-communication--connectivity)
 
 ---
 
@@ -37,7 +38,7 @@ This is a personal project for Jarod. We target exactly one device: the **Garmin
 | **Background Memory** | 64 KB |
 | **Input** | Capacitive touchscreen + 2 buttons (Enter, Escape) |
 | **Launcher Icon Size** | 54 × 54 px |
-| **Communications** | Phone companion via Garmin Connect Mobile |
+| **Communications** | Wi-Fi direct + Phone BT proxy via `Communications.makeWebRequest()` |
 
 ### Design Philosophy
 
@@ -52,12 +53,13 @@ This is a personal project for Jarod. We target exactly one device: the **Garmin
 | # | Tizen Screen | Garmin Equivalent | CIQ Component | Priority |
 |---|---|---|---|---|
 | 1 | LoginPage (email/password form) | Settings-Based Auth | Garmin Connect Mobile settings + `Application.Properties` | P0 |
-| 2 | MainPage (hub with Queue / Subscribed) | Home Menu | `WatchUi.Menu2` | P0 |
+| 2 | MainPage (hub with Queue / Subscribed) | Home Menu | Custom `WatchUi.View` (split-dock design) | P0 |
 | 3 | QueuePage (unplayed episodes list) | Queue View | `WatchUi.Menu2` with custom `MenuItem` | P0 |
 | 4 | SubscribedPodcastsPage | Podcasts List | `WatchUi.Menu2` | P0 |
 | 5 | *(not in Tizen app)* | Episode List (per podcast) | `WatchUi.Menu2` | P1 |
 | 6 | *(not in Tizen app)* | Now Playing | Custom `WatchUi.View` | P0 |
-| 7 | *(not in Tizen app)* | Loading / Sync Indicator | `WatchUi.ProgressBar` or custom View | P1 |
+| 7 | *(not in Tizen app)* | Settings | Custom `WatchUi.View` | P1 |
+| 8 | *(not in Tizen app)* | Loading / Sync Indicator | `WatchUi.ProgressBar` or custom View | P1 |
 
 ### Screen Descriptions
 
@@ -70,19 +72,37 @@ This is a personal project for Jarod. We target exactly one device: the **Garmin
 - Credentials are stored in `Application.Properties` on the watch
 - On app launch, the watch reads stored credentials and authenticates via the companion
 
-**First-run experience:** If no credentials are stored, the app shows a single-screen message: *"Open YoCasts settings in Garmin Connect to sign in."*
+**First-run experience:** If no credentials are stored, the app shows `LoginPromptView` — a screen prompting the user to sign in. Includes a **skip button** to enter mock data / demo mode (controlled by the `useMockData` Application.Property).
 
-#### 2.2 — Home Menu
+#### 2.2 — Home Menu (Split-Dock Design)
 
-Replaces the Tizen `MainPage`. A custom `WatchUi.View` with three tappable rounded-rectangle pills. See [`garmin-layout-reference.md` §5](garmin-layout-reference.md#5-home-menu-layout-spec) for pixel-perfect positioning.
+Replaces the Tizen `MainPage`. A custom `WatchUi.View` with a **split-dock layout** — scrollable navigation pills in the upper region and a fixed Now Playing dock at the bottom. Uses `InputDelegate` (not `BehaviorDelegate`) for proper touch handling. See [`garmin-layout-reference.md` §5](garmin-layout-reference.md#5-home-menu-layout-spec) for pixel-perfect positioning.
+
+**Upper Region (Y=0–260): Scrollable Pills**
 
 | Pill | Height | Content | Action |
 |---|---|---|---|
 | **Queue** | 68 px | Episode count subtitle | Navigate to Queue screen |
 | **Podcasts** | 68 px | Subscription count subtitle | Navigate to Subscribed Podcasts |
-| **Now Playing** | 100 px | Episode title, progress bar, play/pause | Navigate to Now Playing (tap pill) or toggle playback (tap play button) |
+| **Settings** | 68 px | — | Navigate to Settings screen |
 
-Pills use adaptive width based on their Y position within the 390px round screen (see layout reference §5.7). All three pills fit in the viewport without scrolling (260px content in 290px viewport).
+**Bottom Region (Y=260–390): Fixed Now Playing Dock**
+
+| Element | Content | Action |
+|---|---|---|
+| **Now Playing Dock** | Episode title, progress bar, play/pause button | Tap dock → Navigate to Now Playing; Tap play button → toggle playback |
+
+Pills use adaptive width based on their Y position within the 390px round screen (see layout reference §5.7). The upper pills scroll via swipe; the Now Playing dock is always visible.
+
+#### 2.2a — Settings
+
+In-app settings view accessible from the Settings pill on the Home Menu.
+
+| Element | Detail |
+|---|---|
+| **View type** | Custom `WatchUi.View` |
+| **Content** | Account status (logged-in email or "Not signed in"), Demo Mode toggle (`useMockData` property) |
+| **Interaction** | Tap Demo Mode toggle to switch between `MockPodcastService` and `PocketCastsPodcastService` |
 
 #### 2.3 — Queue (Unplayed Episodes)
 
@@ -135,7 +155,7 @@ Replaces the Tizen `SubscribedPodcastsPage`. Shows podcasts from `GetSubscribedP
 
 #### 2.7 — Loading / Sync Indicator
 
-Shown while data is being fetched from the companion app.
+Shown while data is being fetched from the PocketCasts API (over Wi-Fi or BT).
 
 | Element | Detail |
 |---|---|
@@ -171,21 +191,29 @@ Touch is the **primary input method** on the Venu 4. Buttons are secondary. Desi
          │
          ▼
 ┌─────────────────┐    No credentials    ┌──────────────────────┐
-│  Check Auth     │───────────────────►│  "Set up in Garmin   │
-│  (Properties)   │                     │   Connect" message   │
+│  Check Auth     │───────────────────►│  LoginPromptView     │
+│  (Properties)   │                     │  (skip → demo mode)  │
 └────────┬────────┘                     └──────────────────────┘
-         │ Has credentials
+         │ Has credentials (or demo mode)
          ▼
-┌─────────────────┐
-│   Home Menu     │◄──────────────────────────────┐
-│  ┌───────────┐  │                                │
-│  │ Queue     │──┼───► Queue List ──► Now Playing │
-│  ├───────────┤  │         │              │       │
-│  │ Podcasts  │──┼───► Podcast List      BACK     │
-│  └───────────┘  │         │              │       │
-└─────────────────┘    Episode List ──► Now Playing │
-                            │                      │
-                          BACK ────────────────────┘
+┌─────────────────────────────────────┐
+│          Home Menu (Split-Dock)     │◄─────────────────────────┐
+│  ┌──────── Upper: Scrollable ─────┐ │                          │
+│  │ Queue     │ Podcasts │ Settings │ │                          │
+│  └───────────┴──────────┴─────────┘ │                          │
+│  ┌──────── Bottom: Fixed ─────────┐ │                          │
+│  │        Now Playing Dock        │ │                          │
+│  └────────────────────────────────┘ │                          │
+└───┬──────────┬──────────┬───────────┘                          │
+    │          │          │                                      │
+    ▼          ▼          ▼                                      │
+Queue List  Podcast   Settings                                   │
+    │       List       View                                      │
+    │          │                                                 │
+    ▼          ▼                                                 │
+Now Playing  Episode List ──► Now Playing                        │
+    │              │              │                              │
+  BACK           BACK           BACK ───────────────────────────┘
 ```
 
 ### Navigation Rules
@@ -203,11 +231,20 @@ Touch is the **primary input method** on the Venu 4. Buttons are secondary. Desi
 ### Data Flow Overview
 
 ```
-PocketCasts API ◄──► Companion App (Phone) ◄──► Watch App
-                     (HTTP requests)           (Communications API)
+                    ┌─── Wi-Fi Direct ───┐
+PocketCasts API ◄───┤                    ├──► Watch App
+                    └── BT via Phone ────┘    (Communications.makeWebRequest)
 ```
 
-The watch **never** makes direct HTTP requests to the PocketCasts API. All network calls go through the phone companion.
+The watch makes HTTP requests via `Communications.makeWebRequest()`, which works over **both** Wi-Fi (direct to the internet, no phone needed) and Bluetooth (proxied through the paired phone's internet connection). Three connectivity states exist:
+
+| State | Detection | Capability |
+|---|---|---|
+| **Wi-Fi direct** | `connectionAvailable && !phoneConnected` | Full HTTP access, fast downloads, no phone needed |
+| **Phone BT** | `connectionAvailable && phoneConnected` | Full HTTP access via BLE proxy, slower for large payloads |
+| **Fully offline** | `!connectionAvailable` | Cache-only mode, serve stored data |
+
+See [`offline-sync-design.md` — Connectivity Model](offline-sync-design.md#connectivity-model) for detailed detection logic.
 
 ### Per-Screen Data Requirements
 
@@ -224,10 +261,10 @@ No API calls needed for this screen.
 
 | Data | Source | Cache Strategy |
 |---|---|---|
-| Episode list (title, uuid, podcastTitle, duration, playedUpTo) | Companion → `GetQueue()` | Cache in `Application.Storage` (persist across sessions) |
+| Episode list (title, uuid, podcastTitle, duration, playedUpTo) | `IPodcastService.getQueue()` via API or cache | Cache in `Application.Storage` (persist across sessions) |
 | Episode count | Derived from list | N/A |
 
-**Fetch strategy:** Request fresh data from companion on screen entry. If companion is unavailable, fall back to cached data. Show loading indicator during fetch.
+**Fetch strategy:** Stale-while-revalidate — serve cached data immediately, refresh via `makeWebRequest()` in background when connected (Wi-Fi or BT). TTL-based revalidation: queue refreshes after 5 minutes.
 
 **Cache format:**
 ```
@@ -240,9 +277,9 @@ Max entries: 20
 
 | Data | Source | Cache Strategy |
 |---|---|---|
-| Podcast list (title, uuid, unplayed flag) | Companion → `GetSubscribedPodcasts()` | Cache in `Application.Storage` |
+| Podcast list (title, uuid, unplayed flag) | `IPodcastService.getSubscribedPodcasts()` via API or cache | Cache in `Application.Storage` |
 
-**Fetch strategy:** Same as Queue — fetch on entry, fall back to cache.
+**Fetch strategy:** Stale-while-revalidate — serve cached data immediately, refresh in background. TTL: 30 minutes.
 
 **Cache format:**
 ```
@@ -255,9 +292,9 @@ Max entries: 30
 
 | Data | Source | Cache Strategy |
 |---|---|---|
-| Episodes for a specific podcast | Companion → `GetEpisodesForPodcast(uuid)` | Cache per podcast UUID, evict LRU when > 5 podcasts cached |
+| Episodes for a specific podcast | `IPodcastService.getEpisodesForPodcast(uuid)` via API or cache | Cache per podcast UUID, evict LRU when > 5 podcasts cached |
 
-**Fetch strategy:** Always fetch fresh — episode lists change frequently. Cache is fallback only.
+**Fetch strategy:** On-demand — episodes loaded per-podcast when user navigates. TTL: 1 hour. Stale data always served, refresh in background when connected.
 
 **Cache format:**
 ```
@@ -271,7 +308,7 @@ Max entries: 15 per podcast, max 5 podcasts cached
 | Data | Source | Cache Strategy |
 |---|---|---|
 | Current episode details | Passed from Queue/Episode List selection | Persist in `Application.Properties` as `PlayingEpisode` |
-| Playback position | Local (on-watch media player) | Sync back to companion periodically |
+| Playback position | Local (on-watch media player) | Sync back to server via `/sync/update_episode` when connected |
 | Playback state (playing/paused) | Local | Not persisted (always pause on exit) |
 
 #### 4.6 — Data Size Budget
@@ -331,7 +368,9 @@ Episodes:
 
 ### 5.2 — Now Playing (Custom View)
 
-**Component:** Custom `WatchUi.View` + `WatchUi.BehaviorDelegate`
+**Component:** Custom `WatchUi.View` + `WatchUi.InputDelegate`
+
+> **Note:** Uses `InputDelegate` (not `BehaviorDelegate`) — critical for correct touch event handling on the Venu 4. `InputDelegate` provides `onTap()`, `onSwipe()`, and `onHold()` methods that properly handle touch coordinates.
 
 This is one of two custom-drawn screens (along with Home Menu). See [`garmin-layout-reference.md` §7](garmin-layout-reference.md#7-now-playing-screen-layout-spec) for pixel-perfect positioning.
 
@@ -406,7 +445,7 @@ For `Menu2` screens, Garmin handles font sizing automatically. Custom views use 
 - `Menu2` handles scrolling natively — no custom scroll logic needed for list screens
 - Lists wrap around (scrolling past the last item goes to the first)
 - On touch devices, swipe momentum scrolling is handled by the framework
-- **Home Menu:** No scrolling needed — 3 pills (260px total) fit in the 290px viewport. See [`garmin-layout-reference.md` §5.10](garmin-layout-reference.md#510--scroll-behavior)
+- **Home Menu:** Upper pills scroll via swipe gesture; the Now Playing dock at Y=260–390 is fixed. See [`garmin-layout-reference.md` §5.10](garmin-layout-reference.md#510--scroll-behavior)
 - **Now Playing:** No scrolling — all content is visible at once. Long episode titles use marquee animation (3-phase: pause→scroll→pause→reset at 150ms intervals)
 - For custom views that do need scrolling: use `onSwipe()` with 80px step, `dc.setClip()` viewport, instant snap (no animation). See layout reference §4.5
 
@@ -434,7 +473,7 @@ With 768 KB available, there's room for richer features in future iterations (po
 
 1. **Load data lazily.** Don't load Queue AND Podcasts AND Episodes into memory simultaneously. Load the active screen's data only.
 2. **Release on view exit.** When navigating away from a list, set the data array to `null` so the GC can reclaim it.
-3. **Limit list sizes.** Hard caps: Queue = 20, Podcasts = 30, Episodes per podcast = 15. The companion app should enforce these limits before sending data.
+3. **Limit list sizes.** Hard caps: Queue = 20, Podcasts = 30, Episodes per podcast = 15. The `CachedPodcastService` enforces these limits when caching data.
 4. **No images in v1.** Podcast artwork is expensive in transfer time. Use text-only lists with icon indicators. Artwork is a v2 feature — memory is not the bottleneck on the Venu 4.
 5. **String truncation.** Truncate all user-facing strings before storing. Episode titles: max 50 chars. Podcast titles: max 40 chars.
 
@@ -462,54 +501,57 @@ With 768 KB available, there's room for richer features in future iterations (po
 
 ### 6.5 — Battery Considerations
 
-- Minimize companion communication frequency — don't poll; fetch on user action only
+- Minimize API request frequency — don't poll; use stale-while-revalidate with TTL-based refresh
 - Use `Application.Storage` for persistent cache to avoid re-fetching on every app open
 - Keep Now Playing view updates to 1/second (timer-based `requestUpdate()`)
 - Avoid continuous animations — only animate during active user interaction
 
 ---
 
-## 7. Companion App Requirements
+## 7. Communication & Connectivity
 
 ### 7.1 — Architecture
 
-The Garmin Connect IQ companion runs as part of the Garmin Connect Mobile app on the user's phone. It communicates with the watch via the `Communications` API.
+The watch communicates directly with the PocketCasts API using `Communications.makeWebRequest()`. **No custom companion app is needed.** The Garmin Connect Mobile app on the phone serves only as a transparent BLE proxy when Wi-Fi is unavailable.
 
 ```
-┌─────────────┐     BLE/Wi-Fi      ┌─────────────────┐     HTTPS     ┌─────────────┐
-│  Watch App  │◄──────────────────►│  Companion App  │◄────────────►│ PocketCasts  │
-│  (Monkey C) │  Communications    │  (Phone-side)   │   REST API   │    API       │
-│             │  API               │                 │              │              │
-└─────────────┘                    └─────────────────┘              └─────────────┘
+┌─────────────┐     Wi-Fi Direct     ┌─────────────┐
+│  Watch App  │◄────────────────────►│ PocketCasts  │
+│  (Monkey C) │                      │    API       │
+│             │     BLE → Phone      │              │
+│             │◄── (GCM proxy) ────►│              │
+└─────────────┘                      └─────────────┘
 ```
 
-### 7.2 — Companion Responsibilities
+### 7.2 — Service Architecture
 
-| Function | Description | Watch → Phone Message | Phone → Watch Response |
-|---|---|---|---|
-| **Authenticate** | Login to PocketCasts with stored credentials | `{ "action": "login" }` | `{ "status": "ok", "token": "..." }` or `{ "status": "error", "message": "..." }` |
-| **Fetch Queue** | Get unplayed episodes | `{ "action": "getQueue" }` | `{ "episodes": [...] }` (max 20, truncated fields) |
-| **Fetch Podcasts** | Get subscribed podcast list | `{ "action": "getPodcasts" }` | `{ "podcasts": [...] }` (max 30) |
-| **Fetch Episodes** | Get episodes for a podcast | `{ "action": "getEpisodes", "uuid": "..." }` | `{ "episodes": [...] }` (max 15) |
-| **Sync Playback** | Report playback position back | `{ "action": "syncPosition", "uuid": "...", "position": 1234 }` | `{ "status": "ok" }` |
+The app uses an interface-based service architecture with runtime switching:
+
+| Component | Role |
+|---|---|
+| **`IPodcastService`** | Interface defining sync getters + async fetch methods |
+| **`MockPodcastService`** | Returns hardcoded demo data (for testing and demo mode) |
+| **`PocketCastsPodcastService`** | Real API calls via `Communications.makeWebRequest()` |
+| **`CachedPodcastService`** | Decorator wrapping the real service — cache-first, TTL-based revalidation |
+| **`CacheManager`** | Module handling `Application.Storage` persistence with `"yc_"` key prefix |
+
+Service toggle via `useMockData` Application.Property — switches between `MockPodcastService` and the `CachedPodcastService`-wrapped `PocketCastsPodcastService`.
 
 ### 7.3 — Communication Protocol
 
-**Transport:** `Communications.transmit()` (watch → phone) and `Communications.registerForPhoneAppMessages()` (phone → watch).
+**Transport:** `Communications.makeWebRequest()` — works over both Wi-Fi (direct) and Bluetooth (proxied via phone's Garmin Connect Mobile).
 
-Alternatively, for simpler implementation, use `Communications.makeWebRequest()` where the companion acts as a transparent proxy. This avoids building a custom companion app — the watch calls a small web service or serverless function that wraps the PocketCasts API.
-
-**Recommended approach for v1:** Use `Communications.makeWebRequest()` with a lightweight proxy service. This means:
-- No custom companion app needed (less code to maintain)
-- The proxy handles auth token management
-- The watch sends HTTP requests through the phone's internet connection
-- Garmin Connect Mobile handles the BLE/Wi-Fi transport transparently
+The watch calls the PocketCasts API directly. No proxy service, no custom companion code. This means:
+- No additional infrastructure to host or maintain
+- The watch handles auth tokens itself (stored in `Application.Storage`)
+- `makeWebRequest()` handles the transport layer transparently
+- All API calls use HTTPS with JSON request/response bodies
 
 **Message size limits:**
-- Keep individual messages under 16 KB (Garmin's practical limit for `Communications` payloads)
-- This is why we truncate strings and limit list sizes — a queue of 20 episodes at ~200 bytes each = ~4 KB, well under the limit
+- Keep responses reasonable for watch memory — limit list sizes and truncate strings
+- Queue: max 20 episodes, Podcasts: max 30, Episodes per podcast: max 15
 
-### 7.4 — Auth Flow (Settings-Based)
+### 7.4 — Auth Flow
 
 ```
 1. User installs YoCasts on watch from Connect IQ Store
@@ -517,29 +559,25 @@ Alternatively, for simpler implementation, use `Communications.makeWebRequest()`
 3. User enters PocketCasts email + password
 4. Settings are synced to watch via Application.Properties
 5. On first app launch, watch reads credentials from Properties
-6. Watch sends auth request through Communications API
-7. Companion/proxy authenticates with PocketCasts API
-8. Auth token is returned and stored on-watch for session
+6. Watch calls POST /user/login_pocket_casts directly
+7. Receives accessToken + refreshToken + expiresIn
+8. Tokens stored in Application.Storage on-watch
+9. Token refresh via POST /user/token with {grantType, refreshToken}
+10. If refresh fails, fallback to re-login with stored credentials
 ```
 
-**Security note:** Credentials in `Application.Properties` are stored in Garmin's device storage — not encrypted, but only accessible to the app. For v2, consider OAuth or token-only storage where the password never leaves the phone.
+**Alternative:** User can skip login and use demo mode (MockPodcastService) via the `LoginPromptView` skip button.
 
 ### 7.5 — Offline Behavior
 
 | Scenario | Behavior |
 |---|---|
-| Phone not connected | Show cached data with "Offline" indicator. All screens usable except Sync. |
-| Phone connected, API error | Show cached data + toast "Sync failed" |
-| No cached data, no connection | Show empty state message per screen (see §5.4) |
-| Playback in progress, connection lost | Continue playback uninterrupted. Queue position sync on reconnect. |
+| Wi-Fi available, no phone | Full API access. Sync, browse, download episodes. |
+| Phone connected via BT | Full API access via proxy. Metadata sync works well; large downloads are slower. |
+| Fully offline (no Wi-Fi, no phone) | Show cached data. All screens usable with stale data. Mutations logged to changelog for later sync. |
+| Connection lost during playback | Continue playback uninterrupted. Position sync on reconnect. |
 
-### 7.6 — Companion Implementation Options
-
-| Option | Pros | Cons | Recommendation |
-|---|---|---|---|
-| **makeWebRequest + Proxy** | No companion app code, simpler, faster to ship | Requires hosting a proxy service | ✅ **v1 — start here** |
-| **Custom Companion (Android)** | Full control, richer features, offline phone-side caching | More code, two codebases to maintain | v2 if needed |
-| **Custom Companion (Android + iOS)** | Full platform coverage | Significant effort, two mobile codebases | v3 / future |
+See [`offline-sync-design.md`](offline-sync-design.md) for the complete offline mode and sync reconciliation architecture.
 
 ---
 
@@ -555,43 +593,51 @@ Alternatively, for simpler implementation, use `Communications.makeWebRequest()`
 | `Entry` (text input) | `Application.Properties` (settings on phone) |
 | `Tizen.Applications.Preference` | `Application.Storage` / `Application.Properties` |
 | `NavigationService` (push/pop pages) | `WatchUi.pushView()` / `WatchUi.popView()` |
-| `HttpClient` / direct HTTP | `Communications.makeWebRequest()` via phone |
-| `DownloadService` (file download) | Not applicable in v1 — stream or proxy through companion |
+| `HttpClient` / direct HTTP | `Communications.makeWebRequest()` (direct over Wi-Fi or BT proxy) |
+| `DownloadService` (file download) | `Media` module + `Communications.makeWebRequest()` over Wi-Fi (Phase 3) |
 
-## Appendix B: File Structure (Proposed)
+## Appendix B: File Structure (Actual)
 
 ```
-YoCasts-Garmin/
+YoCastsGarmin/
 ├── source/
-│   ├── YoCastsApp.mc              # AppBase — lifecycle, Properties init
-│   ├── HomeMenuView.mc            # Menu2 — Queue / Podcasts
-│   ├── HomeMenuDelegate.mc        # Menu2InputDelegate
-│   ├── QueueView.mc               # Menu2 — episode queue
-│   ├── QueueDelegate.mc           # Menu2InputDelegate
-│   ├── PodcastsView.mc            # Menu2 — subscribed podcasts
-│   ├── PodcastsDelegate.mc        # Menu2InputDelegate
-│   ├── EpisodesView.mc            # Menu2 — episodes for a podcast
-│   ├── EpisodesDelegate.mc        # Menu2InputDelegate
-│   ├── NowPlayingView.mc          # Custom View — playback screen
-│   ├── NowPlayingDelegate.mc      # BehaviorDelegate — playback controls
-│   ├── LoadingView.mc             # Sync/loading indicator
-│   ├── AuthPromptView.mc          # "Set up in Garmin Connect" message
-│   └── DataManager.mc             # Storage, caching, companion communication
+│   ├── YoCastsApp.mc                      # AppBase — lifecycle, Properties init, service toggle
+│   ├── models/
+│   │   └── DataModels.mc                  # Dictionary keys / constants for podcast/episode data
+│   ├── services/
+│   │   ├── IPodcastService.mc             # Interface — sync getters + async fetch methods
+│   │   ├── MockPodcastService.mc          # Demo data (useMockData = true)
+│   │   ├── PocketCastsPodcastService.mc   # Real API via makeWebRequest
+│   │   ├── CachedPodcastService.mc        # Cache-first decorator (TTL revalidation)
+│   │   └── CacheManager.mc               # Application.Storage wrapper ("yc_" prefix)
+│   └── views/
+│       ├── HomeMenuView.mc                # Custom View — split-dock design (pills + Now Playing)
+│       ├── MainMenuView.mc                # (legacy — being replaced by HomeMenuView)
+│       ├── QueueView.mc                   # Menu2 — episode queue
+│       ├── SubscribedView.mc              # Menu2 — subscribed podcasts
+│       ├── EpisodeListView.mc             # Menu2 — episodes for a podcast
+│       ├── NowPlayingView.mc              # Custom View — full-screen playback
+│       ├── LoginPromptView.mc             # Auth prompt with skip button for demo mode
+│       └── SettingsView.mc                # In-app settings (account status, demo toggle)
 ├── resources/
-│   ├── strings.xml                # All user-facing strings
-│   ├── settings.xml               # Phone-side settings (email, password)
-│   ├── menus/                     # Menu XML definitions (if using declarative menus)
-│   └── drawables/                 # App icon per device resolution
-├── manifest.xml                   # App manifest, device compatibility, permissions
-└── monkey.jungle                  # Build configuration
+│   ├── strings/
+│   │   └── strings.xml                    # User-facing strings
+│   ├── settings/
+│   │   ├── settings.xml                   # Phone-side settings (email, password, useMockData)
+│   │   └── properties.xml                 # Property definitions
+│   └── drawables/
+│       ├── drawables.xml                  # Drawable definitions
+│       └── launcher_icon.png              # App icon
+├── manifest.xml                           # App manifest, device compatibility, permissions
+└── monkey.jungle                          # Build configuration
 ```
 
 ## Appendix C: Open Questions
 
-1. **Audio playback on Garmin:** Connect IQ has limited audio support (`Media` module, CIQ 3.1+). Need to investigate whether we can stream audio or if we must download episodes to watch storage first. This significantly impacts the companion app requirements.
+1. **Audio playback on Garmin:** ✅ **Resolved.** Garmin's `Media` module (CIQ 3.1+) supports audio playback. Episodes must be downloaded to watch storage first — no streaming. Download can happen over Wi-Fi directly (no phone needed). See `offline-sync-design.md` Phase 3 for the download architecture.
 
-2. **PocketCasts API stability:** The existing Tizen app uses a reverse-engineered API. If endpoints change, the proxy/companion needs updating. Consider abstracting the API layer.
+2. **PocketCasts API stability:** The API is reverse-engineered. 20/25 endpoints confirmed working via live testing. See `pocketcasts-api-reference.md` for the current state. The service layer (`IPodcastService` interface) abstracts the API so endpoint changes only affect `PocketCastsPodcastService.mc`.
 
-3. **Proxy hosting:** If we go the `makeWebRequest` route, where does the proxy live? Options: Cloudflare Worker, AWS Lambda, self-hosted. This is a decision for Wash (backend).
+3. **Proxy hosting:** ✅ **Resolved — not needed.** The watch calls the PocketCasts API directly via `Communications.makeWebRequest()` over Wi-Fi or BT. No proxy infrastructure required.
 
-4. **Episode download vs. streaming:** Garmin watches with music support (Venu, Forerunner Music editions) can store audio files. Should we download episodes to the watch for offline playback? This is a v2 feature but impacts architecture decisions now.
+4. **Episode download vs. streaming:** ✅ **Resolved.** Download-only. Episodes download to watch storage over Wi-Fi (direct or via charger+sync). Planned for offline-sync Phase 3. See `offline-sync-design.md` §3.

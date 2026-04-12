@@ -1,7 +1,7 @@
 # PocketCasts API Reference
 
 > **Status:** Unofficial / Reverse-Engineered — **Live-tested 2026-04-11** ✅  
-> **Last Updated:** 2026-04-12  
+> **Last Updated:** 2026-04-14  
 > **Maintained by:** YoCasts project (Wash, API Dev)  
 > **Sources:** Existing C# code in this repo, [furgoose/Pocket-Casts](https://github.com/furgoose/Pocket-Casts), [yfhyou/api_pocketcasts](https://github.com/yfhyou/api_pocketcasts), [api-pocketcasts on PyPI](https://pypi.org/project/api-pocketcasts/), [rudiedirkx/pocketcasts-api-client](https://github.com/rudiedirkx/pocketcasts-api-client), [coughlanio/pocketcasts](https://github.com/coughlanio/pocketcasts), [podwriter/pocketcasts](https://github.com/podwriter/pocketcasts), community research
 
@@ -13,7 +13,7 @@
 |----------|--------|
 | `POST /user/login` | ✅ Confirmed |
 | `POST /user/login_pocket_casts` | ✅ Confirmed |
-| `POST /user/token` | ⚠️ Understood (was 400 — wrong request format) |
+| `POST /user/token` | ✅ Working (was 400 — wrong request format, now resolved) |
 | `GET /subscription/status` | ✅ Confirmed |
 | `POST /user/podcast/list` | ✅ Confirmed |
 | `POST /user/podcast/episodes` | ✅ Confirmed |
@@ -963,16 +963,17 @@ The old Tizen app code in this repo (`PodcastApp/`) used several patterns that h
 ### Token Expiry
 
 Tokens appear to expire after an extended period (days to weeks). When a 401 is received:
-1. Try refreshing with `POST /user/token`
-2. If that fails, re-authenticate with `POST /user/login`
+1. Try refreshing with `POST /user/token` (body: `{ "grantType": "refresh_token", "refreshToken": "..." }`, NO Bearer header)
+2. If that fails (`invalid_grant`), re-authenticate with `POST /user/login_pocket_casts`
 
 ### Recommended Error Strategy for Garmin
 
-Since the watch loses connectivity frequently:
-1. Cache the auth token persistently on the phone companion
-2. On 401, attempt one token refresh before re-login
-3. Queue failed sync updates and retry when connectivity returns
-4. Keep payloads minimal — only send what changed
+Since the watch may lose connectivity frequently:
+1. Store access and refresh tokens persistently in `Application.Storage`
+2. On 401, attempt token refresh via `POST /user/token` with `{grantType, refreshToken}`
+3. If refresh fails (`invalid_grant`), re-login via `POST /user/login_pocket_casts` with stored credentials
+4. Queue failed sync updates in changelog and retry when connectivity returns
+5. Keep payloads minimal — only send what changed
 
 ---
 
@@ -994,13 +995,14 @@ These endpoints returned errors during live testing:
 
 | Endpoint | Status | Notes |
 |----------|--------|-------|
-| `POST /user/token` | 400 Bad Request | Token refresh — may need different request body or be deprecated |
 | `POST /user/named_settings/fetch` | 404 Not Found | Settings endpoint removed or moved |
 | `GET /user/settings` | 404 Not Found | Does not exist |
 | `GET /user/profile` | 404 Not Found | Does not exist |
 | `POST /files/list` | 404 Not Found | User files — may be Plus-only or removed |
 | `POST /user/filters` | 404 Not Found | Episode filters — may have moved |
 | `GET /recommendations/user_podcast` | 404 Not Found | Personalized recs removed |
+
+> **Note:** `POST /user/token` was previously listed here as "400 Bad Request" — this has been **resolved**. The 400 was caused by sending `{}` with a Bearer header. The correct request format is `{ "grantType": "refresh_token", "refreshToken": "..." }` with no Authorization header. See the [Authentication](#authentication) section for details.
 
 ---
 
