@@ -63,4 +63,17 @@
 - **Episode metadata gap confirmed in implementation:** `/user/podcast/episodes` returns no titles. Must call `/user/episode` individually for each episode to get display-ready data. Capped at 15 episodes per podcast to limit request volume.
 - **Cross-team update (2026-04-12):** Kaylee implemented Phase 1 offline caching. `CachedPodcastService` wraps `PocketCastsPodcastService` transparently via decorator pattern — no API service changes needed. CacheManager uses `"yc_"`-prefixed keys in `Application.Storage` with `cachedAt` timestamps. Read-through getters cache fresh data on each view cycle. TTLs (queue 5min, podcasts 30min, episodes 1hr) are revalidation hints, not expiry — stale data always served. `clearValues()` used for cache clearing in Phase 1; must become selective when changelog/auth tokens are added to Storage.
 - **Cross-team update (2026-04-12):** Kaylee rewrote `HomeMenuView` with scrolling viewport (`dc.setClip`), increased touch targets (72/140px pills, 20px gaps), pixel-based text truncation via binary search. Fixed 20+ strict-mode type errors in `PocketCastsPodcastService.mc` (callback `data` typed `Dictionary or String or Null`, body typed `Dictionary<Object, Object>`, full Method type annotations) and 4 in `CacheManager.mc` (`Storage.ValueType` casts). All services compile clean at `-l 3`.
+- **Audio download research (2026-04-12):** Comprehensive live-tested research on PocketCasts audio download mechanics. Key findings:
+  1. **PocketCasts does NOT proxy audio** — URLs point directly to podcast host CDNs (Megaphone, Simplecast, Transistor, SupportingCast, Podbean). PocketCasts passes through original RSS enclosure URLs unmodified.
+  2. **No auth needed for audio downloads** — All 7 tested CDNs returned 200 OK without any PocketCasts Bearer token. Audio URLs are publicly accessible.
+  3. **All URLs redirect** — 1 to 6 hops through analytics/tracking services (Podtrac, Podsights, Megaphone AI, Chartable, Podscribe, etc.) before reaching the final CDN.
+  4. **Range requests fully supported** — All 7 CDNs returned 206 Partial Content with `Content-Range` headers. Resumable downloads confirmed.
+  5. **API `size` field is unreliable** — String type, often `"0"`, and when present doesn't always match actual Content-Length. Must HEAD the URL for real size.
+  6. **File sizes average ~1 MB per minute** — Ranging from 18.8 MB (17 min) to 242.5 MB (4.4 hrs).
+  7. **SupportingCast premium URLs embed JWT tokens** — Contain a timestamp field `d` (Unix epoch) that may expire. A 3.3-day-old URL still worked. Always re-fetch URLs from API before downloading.
+  8. **No batch sync endpoint** — `/sync/update_episode` is per-episode only. No way to push multiple position updates in one call.
+  9. **`/user/in_progress` sufficient for bulk reconciliation** — Returns all in-progress episodes with `playedUpTo` and `playingStatus`. No per-episode fetches needed for sync.
+  10. **Up Next is read-write** — Queue management endpoints (`play_next`, `play_last`, `remove`) all confirmed in API reference. Watch could modify queue but v1 design says server-authoritative.
+  - Added `AudioProbe.cs` and `AudioProbeRunner.cs` to test harness (menu option 16). Probes audio URLs with HEAD/Range requests, traces redirect chains, compares auth vs no-auth behavior.
+  - Results published to `docs/pocketcasts-audio-download-research.md` — includes flow diagrams, CDN mapping, size estimates, and Garmin implementation recommendations.
 

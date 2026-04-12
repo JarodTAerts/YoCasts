@@ -138,6 +138,7 @@ while (true)
     Console.WriteLine("  13. Get featured/trending podcasts");
     Console.WriteLine("  14. Get categories");
     Console.WriteLine("  15. Test error handling");
+    Console.WriteLine("  16. 🔊 Audio download research probe");
     Console.WriteLine("  0.  Exit");
     Console.WriteLine();
     Console.Write("  > ");
@@ -230,6 +231,10 @@ while (true)
             await runner.TestBadLogin();
             await runner.TestUnauthenticatedAccess();
             await runner.TestInvalidEndpoint();
+            break;
+
+        case "16":
+            await AudioProbeRunner.RunAudioProbes(client, resultsDir);
             break;
 
         default:
