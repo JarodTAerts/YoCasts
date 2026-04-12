@@ -5,26 +5,51 @@ import Toybox.System;
 import Toybox.Math;
 import Toybox.Timer;
 
-//! Now Playing screen — custom View showing current episode info.
-//! Displays podcast name, episode title, progress arc, and time.
-//! Uses marquee scrolling for overflowing text.
+//! Now Playing — full-screen playback view per layout reference §7.
+//! Progress arc, podcast name, episode title (marquee), 3 control buttons,
+//! and time display. Uses consistent design language with HomeMenuView.
 class NowPlayingView extends WatchUi.View {
 
     private var _episode as Dictionary;
     private var _isPlaying as Boolean = false;
     private var _currentPosition as Number;
 
+    // --- Layout constants from spec §7.2 ---
+    private const CX = 195;
+    private const CY = 195;
+    private const ARC_RADIUS = 185;
+    private const ARC_PEN = 6;
+
+    private const PODCAST_Y = 80;
+    private const TITLE_Y = 140;
+    private const CONTROLS_Y = 245;
+    private const TIME_Y = 300;
+
+    private const SKIP_BACK_CX = 110;
+    private const PLAY_CX = 195;
+    private const SKIP_FWD_CX = 280;
+    private const SKIP_R = 24;
+    private const PLAY_R = 32;
+
+    // Touch radii (larger than visual for comfortable tapping)
+    public const SKIP_TOUCH_R = 30;
+    public const PLAY_TOUCH_R = 38;
+
+    // Max text widths from spec §7.5
+    private const PODCAST_MAX_W = 275;
+    private const TITLE_MAX_W = 331;
+
     // Marquee state for episode title
     private var _marqueeTimer as Timer.Timer? = null;
-    private var _epTitleOffset as Number = 0;
-    private var _epTitleMaxScroll as Number = 0;
-    private var _epTitlePhase as Number = 0;
-    private var _epTitlePause as Number = 15;
+    private var _titleOffset as Number = 0;
+    private var _titleMaxScroll as Number = 0;
+    private var _titlePhase as Number = 0;
+    private var _titlePause as Number = 15;
     // Marquee state for podcast name
-    private var _podNameOffset as Number = 0;
-    private var _podNameMaxScroll as Number = 0;
-    private var _podNamePhase as Number = 0;
-    private var _podNamePause as Number = 15;
+    private var _podOffset as Number = 0;
+    private var _podMaxScroll as Number = 0;
+    private var _podPhase as Number = 0;
+    private var _podPause as Number = 15;
 
     function initialize(episode as Dictionary) {
         View.initialize();
@@ -45,53 +70,53 @@ class NowPlayingView extends WatchUi.View {
         }
     }
 
-    //! Marquee timer callback
+    //! Marquee timer callback — animates overflowing text
     function onMarqueeTick() as Void {
         var needsUpdate = false;
 
-        // Episode title track
-        if (_epTitleMaxScroll > 0) {
-            if (_epTitlePhase == 0) {
-                _epTitlePause = _epTitlePause - 1;
-                if (_epTitlePause <= 0) { _epTitlePhase = 1; }
-            } else if (_epTitlePhase == 1) {
-                _epTitleOffset = _epTitleOffset + 2;
+        // Episode title marquee
+        if (_titleMaxScroll > 0) {
+            if (_titlePhase == 0) {
+                _titlePause = _titlePause - 1;
+                if (_titlePause <= 0) { _titlePhase = 1; }
+            } else if (_titlePhase == 1) {
+                _titleOffset = _titleOffset + 2;
                 needsUpdate = true;
-                if (_epTitleOffset >= _epTitleMaxScroll) {
-                    _epTitleOffset = _epTitleMaxScroll;
-                    _epTitlePhase = 2;
-                    _epTitlePause = 10;
+                if (_titleOffset >= _titleMaxScroll) {
+                    _titleOffset = _titleMaxScroll;
+                    _titlePhase = 2;
+                    _titlePause = 10;
                 }
             } else {
-                _epTitlePause = _epTitlePause - 1;
-                if (_epTitlePause <= 0) {
-                    _epTitleOffset = 0;
-                    _epTitlePhase = 0;
-                    _epTitlePause = 15;
+                _titlePause = _titlePause - 1;
+                if (_titlePause <= 0) {
+                    _titleOffset = 0;
+                    _titlePhase = 0;
+                    _titlePause = 15;
                     needsUpdate = true;
                 }
             }
         }
 
-        // Podcast name track
-        if (_podNameMaxScroll > 0) {
-            if (_podNamePhase == 0) {
-                _podNamePause = _podNamePause - 1;
-                if (_podNamePause <= 0) { _podNamePhase = 1; }
-            } else if (_podNamePhase == 1) {
-                _podNameOffset = _podNameOffset + 2;
+        // Podcast name marquee
+        if (_podMaxScroll > 0) {
+            if (_podPhase == 0) {
+                _podPause = _podPause - 1;
+                if (_podPause <= 0) { _podPhase = 1; }
+            } else if (_podPhase == 1) {
+                _podOffset = _podOffset + 2;
                 needsUpdate = true;
-                if (_podNameOffset >= _podNameMaxScroll) {
-                    _podNameOffset = _podNameMaxScroll;
-                    _podNamePhase = 2;
-                    _podNamePause = 10;
+                if (_podOffset >= _podMaxScroll) {
+                    _podOffset = _podMaxScroll;
+                    _podPhase = 2;
+                    _podPause = 10;
                 }
             } else {
-                _podNamePause = _podNamePause - 1;
-                if (_podNamePause <= 0) {
-                    _podNameOffset = 0;
-                    _podNamePhase = 0;
-                    _podNamePause = 15;
+                _podPause = _podPause - 1;
+                if (_podPause <= 0) {
+                    _podOffset = 0;
+                    _podPhase = 0;
+                    _podPause = 15;
                     needsUpdate = true;
                 }
             }
@@ -103,12 +128,7 @@ class NowPlayingView extends WatchUi.View {
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
-        var width = dc.getWidth();
-        var height = dc.getHeight();
-        var cx = width / 2;
-        var cy = height / 2;
-
-        // Clear background
+        // Clear background (AMOLED true black)
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
 
@@ -116,104 +136,108 @@ class NowPlayingView extends WatchUi.View {
         var podcastTitle = _episode[DataKeys.E_PODCAST_TITLE] as String;
         var episodeTitle = _episode[DataKeys.E_TITLE] as String;
 
-        // Draw progress arc around screen edge
-        drawProgressArc(dc, cx, cy, width, height, duration);
-
-        var maxTextW = width - 60;
-        var containerX = 30;
-
-        // Podcast name (top, gray — marquee if overflows)
-        _drawMarquee(dc, podcastTitle, Graphics.FONT_XTINY,
-                     containerX, cy - 55, maxTextW,
-                     _podNameOffset, false);
-
-        // Episode title (center, white — marquee if overflows)
-        _drawMarquee(dc, episodeTitle, Graphics.FONT_SMALL,
-                     containerX, cy - 15, maxTextW,
-                     _epTitleOffset, true);
-
-        // Play/Pause indicator — drawn with Graphics shapes
-        var btnCx = cx;
-        var btnCy = cy + 20;
-        var btnR = 18;
-
-        // Button circle background
-        if (_isPlaying) {
-            dc.setColor(Graphics.COLOR_GREEN, Graphics.COLOR_TRANSPARENT);
-        } else {
-            dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        }
-        dc.fillCircle(btnCx, btnCy, btnR);
-
-        // Icon inside button
-        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
-        if (_isPlaying) {
-            // Pause: two vertical bars
-            dc.fillRectangle(btnCx - 7, btnCy - 8, 5, 16);
-            dc.fillRectangle(btnCx + 2, btnCy - 8, 5, 16);
-        } else {
-            // Play: right-pointing triangle
-            var pts = [[btnCx - 6, btnCy - 10],
-                       [btnCx - 6, btnCy + 10],
-                       [btnCx + 10, btnCy]];
-            dc.fillPolygon(pts);
-        }
-
-        // Time display (bottom)
-        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
-        var timeStr = DataFormat.formatTime(_currentPosition) + " / " + DataFormat.formatTime(duration);
-        dc.drawText(cx, cy + 55, Graphics.FONT_XTINY, timeStr,
-                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-    }
-
-    //! Draw text with marquee if it overflows container width
-    private function _drawMarquee(dc as Graphics.Dc, text as String,
-                                   font as Graphics.FontDefinition,
-                                   containerX as Number, y as Number,
-                                   containerW as Number,
-                                   offset as Number, isTitle as Boolean) as Void {
-        var fullW = dc.getTextWidthInPixels(text, font);
-        var color = isTitle ? Graphics.COLOR_WHITE : 0xAAAAAA;
-        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
-
-        if (fullW <= containerW) {
-            dc.drawText(containerX + containerW / 2, y, font, text,
-                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-            if (isTitle) { _epTitleMaxScroll = 0; } else { _podNameMaxScroll = 0; }
-            return;
-        }
-
-        var overflow = fullW - containerW;
-        if (isTitle) { _epTitleMaxScroll = overflow; } else { _podNameMaxScroll = overflow; }
-
-        var fontH = dc.getFontHeight(font);
-        dc.setClip(containerX, y - fontH / 2, containerW, fontH);
-        dc.drawText(containerX - offset, y, font, text,
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-        dc.clearClip();
-    }
-
-    //! Draw a progress arc around the edge of the screen
-    private function drawProgressArc(dc as Graphics.Dc, cx as Number, cy as Number,
-                                      width as Number, height as Number,
-                                      duration as Number) as Void {
-        var radius = cx - 4;
-
-        // Background arc (dark gray)
+        // 1. Progress arc background (full circle, dark gray)
         dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(4);
-        dc.drawArc(cx, cy, radius, Graphics.ARC_CLOCKWISE, 90, -270);
+        dc.setPenWidth(ARC_PEN);
+        dc.drawArc(CX, CY, ARC_RADIUS, Graphics.ARC_CLOCKWISE, 0, 360);
 
-        // Progress arc (blue)
+        // 2. Progress arc fill (accent blue, proportional)
         if (duration > 0 && _currentPosition > 0) {
             var progress = _currentPosition.toFloat() / duration.toFloat();
             if (progress > 1.0) { progress = 1.0; }
-            var endAngle = 90 - (progress * 360.0).toNumber();
-            dc.setColor(Graphics.COLOR_BLUE, Graphics.COLOR_TRANSPARENT);
-            dc.drawArc(cx, cy, radius, Graphics.ARC_CLOCKWISE, 90, endAngle);
+            var degrees = (progress * 360.0).toNumber();
+            dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+            dc.drawArc(CX, CY, ARC_RADIUS, Graphics.ARC_CLOCKWISE, 90, 90 - degrees);
+        }
+        dc.setPenWidth(1);
+
+        // 3. Podcast name (top, gray, marquee)
+        drawMarqueeText(dc, podcastTitle, Graphics.FONT_XTINY,
+                        0xAAAAAA, CX, PODCAST_Y, PODCAST_MAX_W,
+                        _podOffset, false);
+
+        // 4. Episode title (center, white, FONT_MEDIUM, marquee)
+        drawMarqueeText(dc, episodeTitle, Graphics.FONT_MEDIUM,
+                        0xFFFFFF, CX, TITLE_Y, TITLE_MAX_W,
+                        _titleOffset, true);
+
+        // 5. Control buttons
+        drawControls(dc);
+
+        // 6. Time display (bottom, gray)
+        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
+        var timeStr = DataFormat.formatTime(_currentPosition) + " / " + DataFormat.formatTime(duration);
+        dc.drawText(CX, TIME_Y, Graphics.FONT_TINY, timeStr,
+                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+    }
+
+    //! Draw the three control buttons: skip back, play/pause, skip forward
+    private function drawControls(dc as Graphics.Dc) as Void {
+        // --- Skip Back button (left, gray circle) ---
+        dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(SKIP_BACK_CX, CONTROLS_Y, SKIP_R);
+        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
+        // Rewind icon: two left-pointing triangles + bar
+        var bx = SKIP_BACK_CX;
+        var by = CONTROLS_Y;
+        dc.fillPolygon([[bx + 2, by - 8], [bx + 2, by + 8], [bx - 8, by]]);
+        dc.fillPolygon([[bx + 10, by - 8], [bx + 10, by + 8], [bx, by]]);
+        dc.fillRectangle(bx - 10, by - 8, 2, 16);
+
+        // --- Play/Pause button (center, accent circle) ---
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(PLAY_CX, CONTROLS_Y, PLAY_R);
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
+        if (_isPlaying) {
+            // Pause bars
+            dc.fillRectangle(PLAY_CX - 10, CONTROLS_Y - 12, 7, 24);
+            dc.fillRectangle(PLAY_CX + 3, CONTROLS_Y - 12, 7, 24);
+        } else {
+            // Play triangle (right-pointing)
+            dc.fillPolygon([[PLAY_CX - 10, CONTROLS_Y - 14],
+                            [PLAY_CX - 10, CONTROLS_Y + 14],
+                            [PLAY_CX + 14, CONTROLS_Y]]);
         }
 
-        dc.setPenWidth(1);
+        // --- Skip Forward button (right, gray circle) ---
+        dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(SKIP_FWD_CX, CONTROLS_Y, SKIP_R);
+        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
+        // Fast-forward icon: two right-pointing triangles + bar
+        var fx = SKIP_FWD_CX;
+        var fy = CONTROLS_Y;
+        dc.fillPolygon([[fx - 10, fy - 8], [fx - 10, fy + 8], [fx, fy]]);
+        dc.fillPolygon([[fx - 2, fy - 8], [fx - 2, fy + 8], [fx + 8, fy]]);
+        dc.fillRectangle(fx + 8, fy - 8, 2, 16);
+    }
+
+    //! Draw text with marquee scrolling if it overflows the container width.
+    //! isTitle: true for episode title, false for podcast name.
+    private function drawMarqueeText(dc as Graphics.Dc, text as String,
+                                      font as Graphics.FontDefinition,
+                                      color as Number, cx as Number,
+                                      y as Number, maxW as Number,
+                                      offset as Number, isTitle as Boolean) as Void {
+        var fullW = dc.getTextWidthInPixels(text, font);
+        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
+
+        if (fullW <= maxW) {
+            dc.drawText(cx, y, font, text,
+                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+            if (isTitle) { _titleMaxScroll = 0; } else { _podMaxScroll = 0; }
+            return;
+        }
+
+        // Text overflows — marquee scroll
+        var overflow = fullW - maxW;
+        if (isTitle) { _titleMaxScroll = overflow; } else { _podMaxScroll = overflow; }
+
+        var containerX = cx - maxW / 2;
+        var fontH = dc.getFontHeight(font);
+        dc.setClip(containerX, y - fontH / 2, maxW, fontH);
+        dc.drawText(containerX - offset, y, font, text,
+                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.clearClip();
     }
 
     //! Toggle play/pause state
@@ -232,9 +256,9 @@ class NowPlayingView extends WatchUi.View {
         WatchUi.requestUpdate();
     }
 
-    //! Skip back 30 seconds
+    //! Skip back 15 seconds
     function skipBack() as Void {
-        _currentPosition = _currentPosition - 30;
+        _currentPosition = _currentPosition - 15;
         if (_currentPosition < 0) {
             _currentPosition = 0;
         }
@@ -243,14 +267,15 @@ class NowPlayingView extends WatchUi.View {
 }
 
 //! Input delegate for Now Playing screen.
-//! SELECT = play/pause, UP = skip back, DOWN = skip forward, BACK = go back.
-class NowPlayingDelegate extends WatchUi.BehaviorDelegate {
+//! Uses InputDelegate (not BehaviorDelegate) for tap-coordinate hit testing
+//! on play/pause and skip buttons, plus physical button support via onKey.
+class NowPlayingDelegate extends WatchUi.InputDelegate {
 
     private var _episode as Dictionary;
     private var _view as NowPlayingView?;
 
     function initialize(episode as Dictionary) {
-        BehaviorDelegate.initialize();
+        InputDelegate.initialize();
         _episode = episode;
     }
 
@@ -259,31 +284,84 @@ class NowPlayingDelegate extends WatchUi.BehaviorDelegate {
         _view = view;
     }
 
-    function onSelect() as Boolean {
-        if (_view != null) {
-            (_view as NowPlayingView).togglePlayPause();
+    //! Tap handler with coordinate-based hit testing for control buttons
+    function onTap(evt as WatchUi.ClickEvent) as Boolean {
+        if (_view == null) { return false; }
+        var view = _view as NowPlayingView;
+        var coords = evt.getCoordinates();
+        var tapX = coords[0] as Number;
+        var tapY = coords[1] as Number;
+
+        // Hit test against skip back button (110, 245)
+        if (isInCircle(tapX, tapY, 110, 245, view.SKIP_TOUCH_R)) {
+            view.skipBack();
+            return true;
         }
-        return true;
+
+        // Hit test against play/pause button (195, 245)
+        if (isInCircle(tapX, tapY, 195, 245, view.PLAY_TOUCH_R)) {
+            view.togglePlayPause();
+            return true;
+        }
+
+        // Hit test against skip forward button (280, 245)
+        if (isInCircle(tapX, tapY, 280, 245, view.SKIP_TOUCH_R)) {
+            view.skipForward();
+            return true;
+        }
+
+        return false;
     }
 
-    function onNextPage() as Boolean {
-        // DOWN button = skip forward 30s
-        if (_view != null) {
-            (_view as NowPlayingView).skipForward();
+    //! Physical button support
+    function onKey(evt as WatchUi.KeyEvent) as Boolean {
+        var key = evt.getKey();
+
+        if (key == WatchUi.KEY_ENTER || key == WatchUi.KEY_START) {
+            if (_view != null) {
+                (_view as NowPlayingView).togglePlayPause();
+            }
+            return true;
         }
-        return true;
+
+        if (key == WatchUi.KEY_DOWN) {
+            // DOWN = skip forward 30s
+            if (_view != null) {
+                (_view as NowPlayingView).skipForward();
+            }
+            return true;
+        }
+
+        if (key == WatchUi.KEY_UP) {
+            // UP = skip back 15s
+            if (_view != null) {
+                (_view as NowPlayingView).skipBack();
+            }
+            return true;
+        }
+
+        if (key == WatchUi.KEY_ESC) {
+            WatchUi.popView(WatchUi.SLIDE_DOWN);
+            return true;
+        }
+
+        return false;
     }
 
-    function onPreviousPage() as Boolean {
-        // UP button = skip back 30s
-        if (_view != null) {
-            (_view as NowPlayingView).skipBack();
+    //! Swipe right to go back
+    function onSwipe(evt as WatchUi.SwipeEvent) as Boolean {
+        if (evt.getDirection() == WatchUi.SWIPE_RIGHT) {
+            WatchUi.popView(WatchUi.SLIDE_DOWN);
+            return true;
         }
-        return true;
+        return false;
     }
 
-    function onBack() as Boolean {
-        WatchUi.popView(WatchUi.SLIDE_DOWN);
-        return true;
+    //! Circle hit test helper
+    private function isInCircle(x as Number, y as Number,
+                                 cx as Number, cy as Number, r as Number) as Boolean {
+        var dx = x - cx;
+        var dy = y - cy;
+        return (dx * dx + dy * dy) <= (r * r);
     }
 }

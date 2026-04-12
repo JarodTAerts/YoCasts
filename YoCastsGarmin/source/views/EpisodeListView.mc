@@ -45,12 +45,14 @@ class EpisodeListView extends WatchUi.Menu2 {
             var playedUpTo = ep[DataKeys.E_PLAYED_UP_TO] as Number;
             var status = ep[DataKeys.E_PLAYING_STATUS] as Number;
 
-            // Build sublabel with duration and play status
-            var sub = DataFormat.formatDuration(duration);
+            // Build sublabel with duration and visual status indicator
+            var sub = "";
             if (status == DataKeys.STATUS_COMPLETED) {
-                sub = sub + " • Played";
+                sub = "Played | " + DataFormat.formatDuration(duration);
             } else if (status == DataKeys.STATUS_IN_PROGRESS) {
-                sub = DataFormat.formatDuration(playedUpTo) + " / " + sub;
+                sub = DataFormat.formatDuration(playedUpTo) + " / " + DataFormat.formatDuration(duration);
+            } else {
+                sub = DataFormat.formatDuration(duration) + " | New";
             }
 
             addItem(new WatchUi.MenuItem(title, sub, ep[DataKeys.E_UUID] as String, {}));

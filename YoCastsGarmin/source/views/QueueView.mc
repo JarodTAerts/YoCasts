@@ -11,7 +11,7 @@ class QueueView extends WatchUi.Menu2 {
     private var _service as IPodcastService;
 
     function initialize(service as IPodcastService) {
-        Menu2.initialize({:title => "Up Next"});
+        Menu2.initialize({:title => "Queue"});
         _service = service;
         loadQueue();
     }
@@ -36,12 +36,14 @@ class QueueView extends WatchUi.Menu2 {
             var duration = ep[DataKeys.E_DURATION] as Number;
             var playedUpTo = ep[DataKeys.E_PLAYED_UP_TO] as Number;
 
-            // Build sublabel with podcast name and progress
+            // Build sublabel with podcast name, progress, and status
             var sub = podTitle;
-            if (playedUpTo > 0) {
-                sub = sub + " • " + DataFormat.formatDuration(playedUpTo) + "/" + DataFormat.formatDuration(duration);
+            if (playedUpTo > 0 && playedUpTo < duration) {
+                sub = sub + " | " + DataFormat.formatDuration(playedUpTo) + "/" + DataFormat.formatDuration(duration);
+            } else if (playedUpTo >= duration && duration > 0) {
+                sub = sub + " | Played";
             } else {
-                sub = sub + " • " + DataFormat.formatDuration(duration);
+                sub = sub + " | " + DataFormat.formatDuration(duration);
             }
 
             addItem(new WatchUi.MenuItem(title, sub, ep[DataKeys.E_UUID] as String, {}));
