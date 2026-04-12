@@ -79,3 +79,5 @@
 
 
 - **Session orchestration (2026-04-12T15:20:00Z):** Completed background research on PocketCasts audio download API. Delivered \docs/pocketcasts-audio-download-research.md\ with key findings: CDN direct access confirmed, Range headers supported for resumable downloads, no authentication required for audio URLs, HTTP 206 Partial Content fully implemented by all tested CDNs.
+
+- **Cross-team update (2026-04-14):** Audio download research decision filed. Mal's app type migration + Kaylee's UI implementation APPROVED. All inbox decisions merged to `decisions.md`. Phase 3 (audio download) now unblocked and elevated in the offline sync architecture. Mal's five-phase plan: Phase 0 (simulator), A (changelog), B (sync engine), C (download), D (playback), E (polish). Wash's two-token OAuth flow decision awaiting implementation kickoff.

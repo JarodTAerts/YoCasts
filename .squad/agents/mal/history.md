@@ -60,3 +60,17 @@
 
 
 - **Session orchestration (2026-04-12T15:20:00Z):** Completed parallel background research on offline architecture and documentation audit. Delivered \docs/audio-download-implementation-plan.md\ with 5 phases A-E, identified _isConnected() bug in connection state tracking, audited and updated all documentation (garmin-ux-spec v2.0, garmin-app-implementation-guide v2.0, offline-sync-design v1.2, pocketcasts-api-reference).
+
+- **App type migration evaluation (2026-04-14):** Produced comprehensive architecture evaluation at `docs/app-type-migration-evaluation.md`. **Critical finding confirmed:** AudioContentProviderApp inherits from AppBase — ALL View/UI code survives migration. Key learnings:
+  1. **Manifest type is `audio-content-provider-app`** (not `audio-content-provider`). Confirmed from MonkeyMusic sample manifest.
+  2. **AudioContentProviderApp adds 5 methods** on top of AppBase: `getContentDelegate()`, `getSyncDelegate()`, `getPlaybackConfigurationView()`, `getSyncConfigurationView()`, `getProviderIconInfo()`. All existing AppBase methods (getInitialView, onStart, onStop, onSettingsChanged) still work.
+  3. **No separate ContentProvider class exists** — the audio-download-implementation-plan.md referenced `YoCastsContentProvider extends Media.ContentProvider` which doesn't exist in the API. The app class IS the provider. Fixed in evaluation.
+  4. **HomeMenuView survives intact** — served from `getPlaybackConfigurationView()` as the main browsing entry point.
+  5. **NowPlayingView changes role** — from playback controller to episode info display. Garmin's native media player handles actual playback UI, BT headphone routing, and lock-screen controls.
+  6. **Migration scope: ~1 day.** 2 files rewritten (YoCastsApp.mc, manifest.xml), 1 new file (SyncConfigView.mc), 12+ files unchanged.
+  7. **Phase plan updated** — New Phase 0 prepends existing Phases A-E. Phase 0 is a 1-day validation gate.
+  8. **MonkeyMusic sample does NOT override getInitialView()** — uses only the 4 AudioContentProviderApp-specific methods. Our approach overrides both getInitialView() AND getPlaybackConfigurationView() with the same HomeMenuView for maximum compatibility.
+  9. **Media permission** — add `<iq:uses-permission id="Media"/>` to manifest. MonkeyMusic doesn't list it explicitly (may be implicit for audio provider type) — test both ways.
+  10. Decision written to `.squad/decisions/inbox/mal-app-type-migration.md`.
+
+- **Cross-team update (2026-04-14):** App type migration decision APPROVED. Kaylee's split-dock UI implementation complete and build-verified. Wash's audio research unblocks Phase 3. All decisions merged to `decisions.md`. Next gate: Phase 0 simulator validation (AudioContentProviderApp prototype on Venu 4 simulator).
