@@ -2,31 +2,30 @@ import Toybox.Lang;
 import Toybox.Application;
 import Toybox.WatchUi;
 import Toybox.System;
+import Toybox.Media;
 
 //! Main application entry point for YoCasts.
-//! Uses watch-app (AppBase) for now — audio content provider mode
-//! requires downloaded media to function and will be enabled in Phase C.
-//! Service toggle: reads "useMockData" property to choose between
-//! MockPodcastService and PocketCastsPodcastService.
-class YoCastsApp extends Application.AppBase {
+//! Extends AudioContentProviderApp so the app appears in the watch's
+//! Music Providers list and can use the native media player for audio.
+//! Entry point is getPlaybackConfigurationView(), NOT getInitialView().
+class YoCastsApp extends Application.AudioContentProviderApp {
 
     private var _service as IPodcastService?;
 
     function initialize() {
-        AppBase.initialize();
+        AudioContentProviderApp.initialize();
     }
 
     function onStart(state) {
         _service = createService();
-
-        // Kick off async data fetch for the real service
         var svc = _service as IPodcastService;
         svc.fetchAll();
     }
 
-    //! Returns the initial view — no explicit return type annotation per SDK rules.
-    //! Shows login prompt if no credentials, otherwise shows the home menu.
-    function getInitialView() {
+    //! Primary entry point for audio content providers.
+    //! Called when the user selects YoCasts from Music Providers.
+    //! Three-state gate: unauthenticated → login, otherwise → home menu.
+    function getPlaybackConfigurationView() {
         if (hasCredentials() || shouldUseMockData()) {
             var service = getService();
             var view = new HomeMenuView(service);
@@ -36,11 +35,31 @@ class YoCastsApp extends Application.AppBase {
         }
     }
 
+    //! Sync entry point — returns the same HomeMenuView.
+    //! On some devices this is called instead of playback config.
+    function getSyncConfigurationView() {
+        return getPlaybackConfigurationView();
+    }
+
+    //! Returns the content delegate that the native player uses for playback.
+    function getContentDelegate(arg) {
+        return new YoCastsContentDelegate();
+    }
+
+    //! Returns the sync delegate for system-triggered media downloads.
+    function getSyncDelegate() {
+        return new YoCastsSyncDelegate();
+    }
+
+    //! Provides icon and accent color for the Music Provider picker.
+    function getProviderIconInfo() {
+        return new Media.ProviderIconInfo(Rez.Drawables.LauncherIcon, 0x55AAFF);
+    }
+
     function onStop(state) {
     }
 
     //! Called when settings are changed via Garmin Connect Mobile or simulator.
-    //! Recreates the service with new credentials and refreshes the view.
     function onSettingsChanged() as Void {
         System.println("YoCasts: settings changed, recreating service");
         _service = createService();
@@ -75,8 +94,6 @@ class YoCastsApp extends Application.AppBase {
     }
 
     //! Create the appropriate service based on settings.
-    //! Real API mode wraps PocketCastsPodcastService in CachedPodcastService
-    //! for transparent offline caching. Mock mode skips caching.
     private function createService() as IPodcastService {
         if (!shouldUseMockData() && hasCredentials()) {
             try {

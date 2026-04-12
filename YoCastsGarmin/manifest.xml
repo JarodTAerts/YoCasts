@@ -2,7 +2,7 @@
 <iq:manifest xmlns:iq="http://www.garmin.com/xml/connectiq" version="4">
     <iq:application
         id="a3421feed75247efa2a683e6e5152865"
-        type="watch-app"
+        type="audio-content-provider-app"
         name="@Strings.AppName"
         entry="YoCastsApp"
         launcherIcon="@Drawables.LauncherIcon"
