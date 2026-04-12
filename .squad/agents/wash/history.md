@@ -77,3 +77,5 @@
   - Added `AudioProbe.cs` and `AudioProbeRunner.cs` to test harness (menu option 16). Probes audio URLs with HEAD/Range requests, traces redirect chains, compares auth vs no-auth behavior.
   - Results published to `docs/pocketcasts-audio-download-research.md` — includes flow diagrams, CDN mapping, size estimates, and Garmin implementation recommendations.
 
+
+- **Session orchestration (2026-04-12T15:20:00Z):** Completed background research on PocketCasts audio download API. Delivered \docs/pocketcasts-audio-download-research.md\ with key findings: CDN direct access confirmed, Range headers supported for resumable downloads, no authentication required for audio URLs, HTTP 206 Partial Content fully implemented by all tested CDNs.
