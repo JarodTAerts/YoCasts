@@ -7,9 +7,9 @@ import Toybox.System;
 //! Selecting a podcast navigates to its episode list.
 class SubscribedView extends WatchUi.Menu2 {
 
-    private var _service as MockPodcastService;
+    private var _service as IPodcastService;
 
-    function initialize(service as MockPodcastService) {
+    function initialize(service as IPodcastService) {
         Menu2.initialize({:title => "Podcasts"});
         _service = service;
         loadPodcasts();
@@ -19,7 +19,10 @@ class SubscribedView extends WatchUi.Menu2 {
         var podcasts = _service.getSubscribedPodcasts();
 
         if (podcasts.size() == 0) {
-            addItem(new WatchUi.MenuItem("No subscriptions", "Sync from phone", :empty, {}));
+            var sub = _service.isDataReady() ? "Sync from phone" : "Loading...";
+            addItem(new WatchUi.MenuItem(
+                _service.isDataReady() ? "No subscriptions" : "Loading...",
+                sub, :empty, {}));
             return;
         }
 
@@ -40,9 +43,9 @@ class SubscribedView extends WatchUi.Menu2 {
 //! Selecting a podcast pushes the EpisodeListView for that podcast.
 class SubscribedDelegate extends WatchUi.Menu2InputDelegate {
 
-    private var _service as MockPodcastService;
+    private var _service as IPodcastService;
 
-    function initialize(service as MockPodcastService) {
+    function initialize(service as IPodcastService) {
         Menu2InputDelegate.initialize();
         _service = service;
     }

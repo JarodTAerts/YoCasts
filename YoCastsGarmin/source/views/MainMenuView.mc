@@ -6,9 +6,9 @@ import Toybox.System;
 //! Routes to Queue, Podcasts, or Now Playing screens.
 class MainMenuDelegate extends WatchUi.Menu2InputDelegate {
 
-    private var _service as MockPodcastService;
+    private var _service as IPodcastService;
 
-    function initialize(service as MockPodcastService) {
+    function initialize(service as IPodcastService) {
         Menu2InputDelegate.initialize();
         _service = service;
     }

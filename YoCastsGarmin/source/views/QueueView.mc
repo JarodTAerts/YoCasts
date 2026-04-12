@@ -8,9 +8,9 @@ import Toybox.System;
 //! Selecting an episode navigates to Now Playing.
 class QueueView extends WatchUi.Menu2 {
 
-    private var _service as MockPodcastService;
+    private var _service as IPodcastService;
 
-    function initialize(service as MockPodcastService) {
+    function initialize(service as IPodcastService) {
         Menu2.initialize({:title => "Up Next"});
         _service = service;
         loadQueue();
@@ -20,7 +20,10 @@ class QueueView extends WatchUi.Menu2 {
         var queue = _service.getQueue();
 
         if (queue.size() == 0) {
-            addItem(new WatchUi.MenuItem("Queue is empty", "Sync from phone", :empty, {}));
+            var sub = _service.isDataReady() ? "Sync from phone" : "Loading...";
+            addItem(new WatchUi.MenuItem(
+                _service.isDataReady() ? "Queue is empty" : "Loading...",
+                sub, :empty, {}));
             return;
         }
 
@@ -50,9 +53,9 @@ class QueueView extends WatchUi.Menu2 {
 //! Selecting an episode opens Now Playing for that episode.
 class QueueDelegate extends WatchUi.Menu2InputDelegate {
 
-    private var _service as MockPodcastService;
+    private var _service as IPodcastService;
 
-    function initialize(service as MockPodcastService) {
+    function initialize(service as IPodcastService) {
         Menu2InputDelegate.initialize();
         _service = service;
     }

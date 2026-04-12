@@ -1,4 +1,5 @@
 <properties>
     <property id="PocketCastsEmail" type="string"></property>
     <property id="PocketCastsPassword" type="string"></property>
+    <property id="useMockData" type="boolean">true</property>
 </properties>

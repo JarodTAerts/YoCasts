@@ -7,10 +7,10 @@ import Toybox.System;
 //! Selecting an episode navigates to Now Playing.
 class EpisodeListView extends WatchUi.Menu2 {
 
-    private var _service as MockPodcastService;
+    private var _service as IPodcastService;
     private var _podcastUuid as String;
 
-    function initialize(service as MockPodcastService, podcastUuid as String, podcastTitle as String) {
+    function initialize(service as IPodcastService, podcastUuid as String, podcastTitle as String) {
         // Truncate title for menu header
         var menuTitle = podcastTitle;
         if (menuTitle.length() > 18) {
@@ -23,10 +23,16 @@ class EpisodeListView extends WatchUi.Menu2 {
     }
 
     private function loadEpisodes() as Void {
+        // Trigger async fetch if not already cached
+        if (!_service.hasEpisodesForPodcast(_podcastUuid)) {
+            _service.requestEpisodesForPodcast(_podcastUuid);
+        }
+
         var episodes = _service.getEpisodesForPodcast(_podcastUuid);
 
         if (episodes.size() == 0) {
-            addItem(new WatchUi.MenuItem("No episodes", "", :empty, {}));
+            var label = _service.hasEpisodesForPodcast(_podcastUuid) ? "No episodes" : "Loading...";
+            addItem(new WatchUi.MenuItem(label, "", :empty, {}));
             return;
         }
 
@@ -56,10 +62,10 @@ class EpisodeListView extends WatchUi.Menu2 {
 //! Selecting an episode opens Now Playing for that episode.
 class EpisodeListDelegate extends WatchUi.Menu2InputDelegate {
 
-    private var _service as MockPodcastService;
+    private var _service as IPodcastService;
     private var _podcastUuid as String;
 
-    function initialize(service as MockPodcastService, podcastUuid as String) {
+    function initialize(service as IPodcastService, podcastUuid as String) {
         Menu2InputDelegate.initialize();
         _service = service;
         _podcastUuid = podcastUuid;

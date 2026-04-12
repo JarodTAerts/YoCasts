@@ -18,6 +18,22 @@ class MockPodcastService extends IPodcastService {
         _nowPlaying = buildMockNowPlaying();
     }
 
+    function isAuthenticated() as Boolean {
+        return true;
+    }
+
+    function isDataReady() as Boolean {
+        return true;
+    }
+
+    function fetchAll() as Void {
+        // No-op — mock data is pre-loaded
+    }
+
+    function requestEpisodesForPodcast(podcastUuid as String) as Void {
+        // No-op — mock data is pre-loaded
+    }
+
     function getSubscribedPodcasts() as Array<Dictionary> {
         return _podcasts;
     }

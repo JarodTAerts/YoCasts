@@ -2,27 +2,52 @@ import Toybox.Lang;
 
 //! Interface contract for podcast data services.
 //! Implementations can provide mock data or real API data.
-//! The real implementation will use Communications.makeWebRequest
-//! to hit the PocketCasts API through the phone companion.
 //!
-//! All methods return data synchronously for mock, but the real
-//! implementation will use callbacks. Views should handle both patterns.
+//! Synchronous getters return cached data (immediately available for mock,
+//! populated asynchronously for the real API service). Async methods trigger
+//! network fetches; when data arrives, WatchUi.requestUpdate() is called
+//! so views redraw with fresh data.
 class IPodcastService {
 
-    //! Get list of subscribed podcasts.
+    //! Whether the service has authenticated with PocketCasts
+    function isAuthenticated() as Boolean {
+        return false;
+    }
+
+    //! Whether initial data (podcasts + queue) has been loaded
+    function isDataReady() as Boolean {
+        return false;
+    }
+
+    //! Whether episode data for a specific podcast is cached
+    function hasEpisodesForPodcast(podcastUuid as String) as Boolean {
+        return getEpisodesForPodcast(podcastUuid).size() > 0;
+    }
+
+    //! Trigger async fetch of all data (login → podcasts → queue).
+    //! Calls WatchUi.requestUpdate() when each stage completes.
+    function fetchAll() as Void {
+    }
+
+    //! Trigger async fetch of episodes for a specific podcast.
+    //! Results populate the cache returned by getEpisodesForPodcast().
+    function requestEpisodesForPodcast(podcastUuid as String) as Void {
+    }
+
+    //! Get cached list of subscribed podcasts.
     //! Returns: Array of Dictionary with keys from DataKeys.P_*
     function getSubscribedPodcasts() as Array<Dictionary> {
         return [] as Array<Dictionary>;
     }
 
-    //! Get episodes for a specific podcast.
+    //! Get cached episodes for a specific podcast.
     //! @param podcastUuid UUID of the podcast
     //! Returns: Array of Dictionary with keys from DataKeys.E_*
     function getEpisodesForPodcast(podcastUuid as String) as Array<Dictionary> {
         return [] as Array<Dictionary>;
     }
 
-    //! Get the Up Next queue (user-curated play queue).
+    //! Get cached Up Next queue (user-curated play queue).
     //! Returns: Array of Dictionary with keys from DataKeys.E_*
     function getQueue() as Array<Dictionary> {
         return [] as Array<Dictionary>;
