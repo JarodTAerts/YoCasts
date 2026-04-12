@@ -439,17 +439,25 @@ class HomeMenuView extends WatchUi.View {
 }
 
 //! Delegate for the home menu. Tap to navigate, swipe/buttons to scroll.
-class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
+//! Uses InputDelegate (NOT BehaviorDelegate) because BehaviorDelegate's
+//! behavior translator converts ALL screen taps into onSelect() calls,
+//! which prevents onTap() from ever receiving touch coordinates.
+//! With InputDelegate, onTap() fires directly for touch events.
+class HomeMenuDelegate extends WatchUi.InputDelegate {
 
     private var _view as HomeMenuView;
     private var _service as IPodcastService;
+    // Tracks which item the physical button SELECT activates.
+    // Cycles via KEY_UP/KEY_DOWN. 0=Queue, 1=Podcasts, 2=NowPlaying.
+    private var _selectedIndex as Number = 0;
 
     function initialize(view as HomeMenuView, service as IPodcastService) {
-        BehaviorDelegate.initialize();
+        InputDelegate.initialize();
         _view = view;
         _service = service;
     }
 
+    //! Touch: map tap coordinates to the menu item under the finger
     function onTap(evt as WatchUi.ClickEvent) as Boolean {
         var coords = evt.getCoordinates();
         var tapX = coords[0] as Number;
@@ -474,27 +482,62 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
         return false;
     }
 
-    //! SELECT button opens Now Playing
-    function onSelect() as Boolean {
-        navigateToNowPlaying();
-        return true;
+    //! Swipe gestures for scrolling the viewport
+    function onSwipe(evt as WatchUi.SwipeEvent) as Boolean {
+        var dir = evt.getDirection();
+        if (dir == WatchUi.SWIPE_UP) {
+            _view.scrollDown();
+            return true;
+        } else if (dir == WatchUi.SWIPE_DOWN) {
+            _view.scrollUp();
+            return true;
+        }
+        return false;
     }
 
-    //! Swipe up / DOWN button scrolls content down
-    function onNextPage() as Boolean {
-        _view.scrollDown();
-        return true;
+    //! Physical buttons: ENTER=select, UP/DOWN=cycle, ESC=back
+    function onKey(evt as WatchUi.KeyEvent) as Boolean {
+        var key = evt.getKey();
+
+        // SELECT / ACTION button — navigate to the tracked item
+        if (key == WatchUi.KEY_ENTER || key == WatchUi.KEY_START) {
+            navigateByIndex(_selectedIndex);
+            return true;
+        }
+
+        // DOWN — cycle selected index forward
+        if (key == WatchUi.KEY_DOWN) {
+            _selectedIndex = _selectedIndex + 1;
+            if (_selectedIndex > 2) { _selectedIndex = 0; }
+            _view.scrollDown();
+            return true;
+        }
+
+        // UP — cycle selected index backward
+        if (key == WatchUi.KEY_UP) {
+            _selectedIndex = _selectedIndex - 1;
+            if (_selectedIndex < 0) { _selectedIndex = 2; }
+            _view.scrollUp();
+            return true;
+        }
+
+        // BACK button
+        if (key == WatchUi.KEY_ESC) {
+            WatchUi.popView(WatchUi.SLIDE_DOWN);
+            return true;
+        }
+
+        return false;
     }
 
-    //! Swipe down / UP button scrolls content up
-    function onPreviousPage() as Boolean {
-        _view.scrollUp();
-        return true;
-    }
-
-    function onBack() as Boolean {
-        WatchUi.popView(WatchUi.SLIDE_DOWN);
-        return true;
+    private function navigateByIndex(index as Number) as Void {
+        if (index == 0) {
+            navigateToQueue();
+        } else if (index == 1) {
+            navigateToPodcasts();
+        } else {
+            navigateToNowPlaying();
+        }
     }
 
     private function navigateToQueue() as Void {
