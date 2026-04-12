@@ -1,5 +1,38 @@
 # Decision Log
 
+## AudioContentProviderApp Migration Complete — SDK Constraints & Implementation (2026-04-14)
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-04-14  
+**Phase:** Phase 0  
+**Status:** COMPLETED
+
+### Key Findings (SDK 9.1.0)
+
+1. **No `Media` Permission in Manifest** — The SDK rejects `<iq:uses-permission id="Media"/>` as invalid. The Media module is implicitly available for `audio-content-provider-app` types. Only `Communications` permission is needed. Confirmed by Garmin's MonkeyMusic sample.
+
+2. **Communications.SyncDelegate Required** — SDK 9.1.0 enforces `Null or Communications.SyncDelegate` as the return type for `getSyncDelegate()`. Media.SyncDelegate is fully deprecated at the type system level. All future sync code must extend Communications.SyncDelegate.
+
+3. **Inlined View Construction** — The strict type checker requires AudioContentProviderApp view methods to return specific tuple types. A shared helper method returning untyped Array causes type errors. Each method (`getInitialView`, `getPlaybackConfigurationView`, `getSyncConfigurationView`) must construct views inline.
+
+4. **SyncConfigView Deferred to Phase C** — For Phase 0, `getSyncConfigurationView()` returns HomeMenuView. A dedicated SyncConfigView with episode download selection UI will be built in Phase C.
+
+5. **Settings Unchanged** — PocketCastsPassword uses `alphaNumeric` type (no `password` type exists in CIQ). Settings XML works identically in audio-content-provider-app.
+
+### Files Changed
+- `manifest.xml` — type changed to audio-content-provider-app
+- `YoCastsApp.mc` — base class changed, 5 new methods added
+- `source/media/YoCastsContentDelegate.mc` — NEW stub
+- `source/media/YoCastsContentIterator.mc` — NEW stub (includes PlaybackProfile)
+- `source/media/YoCastsSyncDelegate.mc` — NEW stub extending Communications.SyncDelegate
+- `monkey.jungle` — added source/media to sourcePath
+
+### Build Status
+- Monkey C Compiler: PASS at `-l 3` (strict)
+- All tuple returns properly typed
+
+---
+
 ## Migrate to AudioContentProviderApp (2026-04-14)
 
 **By:** Mal (Lead)  
