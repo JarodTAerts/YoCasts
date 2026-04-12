@@ -2,19 +2,18 @@ import Toybox.Lang;
 import Toybox.Application;
 import Toybox.WatchUi;
 import Toybox.System;
-import Toybox.Media;
 
 //! Main application entry point for YoCasts.
-//! Extends AudioContentProviderApp for native media player integration.
-//! Manages lifecycle, service creation, and entry views.
+//! Uses watch-app (AppBase) for now — audio content provider mode
+//! requires downloaded media to function and will be enabled in Phase C.
 //! Service toggle: reads "useMockData" property to choose between
 //! MockPodcastService and PocketCastsPodcastService.
-class YoCastsApp extends Application.AudioContentProviderApp {
+class YoCastsApp extends Application.AppBase {
 
     private var _service as IPodcastService?;
 
     function initialize() {
-        AudioContentProviderApp.initialize();
+        AppBase.initialize();
     }
 
     function onStart(state) {
@@ -24,10 +23,6 @@ class YoCastsApp extends Application.AudioContentProviderApp {
         var svc = _service as IPodcastService;
         svc.fetchAll();
     }
-
-    // ================================================================
-    // AppBase inherited — called on direct app launch
-    // ================================================================
 
     //! Returns the initial view — no explicit return type annotation per SDK rules.
     //! Shows login prompt if no credentials, otherwise shows the home menu.
@@ -40,55 +35,6 @@ class YoCastsApp extends Application.AudioContentProviderApp {
             return [new LoginPromptView(), new LoginPromptDelegate()];
         }
     }
-
-    // ================================================================
-    // AudioContentProviderApp — required methods
-    // ================================================================
-
-    //! Called when user selects "Play" / browses content to play.
-    //! Maps to our HomeMenuView for episode browsing.
-    function getPlaybackConfigurationView() {
-        if (hasCredentials() || shouldUseMockData()) {
-            var service = getService();
-            var view = new HomeMenuView(service);
-            return [view, new HomeMenuDelegate(view, service)];
-        } else {
-            return [new LoginPromptView(), new LoginPromptDelegate()];
-        }
-    }
-
-    //! Called when user selects "Sync" / "Download" from music app.
-    //! Stub: returns the home view. Phase C will add a real SyncConfigView.
-    function getSyncConfigurationView() {
-        if (hasCredentials() || shouldUseMockData()) {
-            var service = getService();
-            var view = new HomeMenuView(service);
-            return [view, new HomeMenuDelegate(view, service)];
-        } else {
-            return [new LoginPromptView(), new LoginPromptDelegate()];
-        }
-    }
-
-    //! Returns the ContentDelegate for playback event handling.
-    function getContentDelegate(args) {
-        return new YoCastsContentDelegate();
-    }
-
-    //! Returns the SyncDelegate for system-triggered downloads.
-    function getSyncDelegate() {
-        return new YoCastsSyncDelegate();
-    }
-
-    //! Provider icon for the music app list.
-    function getProviderIconInfo() {
-        return new Media.ProviderIconInfo(
-            Rez.Drawables.LauncherIcon, 0x55AAFF
-        );
-    }
-
-    // ================================================================
-    // Existing methods — unchanged
-    // ================================================================
 
     function onStop(state) {
     }
