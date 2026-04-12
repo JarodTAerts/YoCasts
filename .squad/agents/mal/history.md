@@ -45,3 +45,10 @@
   5. **On-demand episode fetch** — Episodes loaded per-podcast when user navigates, not bulk at startup. Offline sync layer can build on top of this caching.
   6. **Known gap: Menu2 episode list loading** — Can't dynamically add items post-construction. First visit shows "Loading...", requires back-and-re-enter. Future polish needed.
 
+- **Cross-team update (2026-04-12):** Kaylee implemented Phase 1 of offline sync design. **Architecture impacts:**
+  1. **CacheManager.mc (module)** — Wraps `Application.Storage` with `"yc_"`-prefixed keys and `cachedAt` timestamps. Typed save/load for podcasts, episodes (per-podcast), queue, and playback positions. `clearCache()` uses `clearValues()` — must become selective in Phase 2 when changelog/auth tokens are added.
+  2. **CachedPodcastService.mc (decorator)** — Wraps any `IPodcastService` via constructor injection. Loads cached data on init for instant UI. `fetchAll()` delegates only when `phoneConnected == true`. Read-through getters cache on each view cycle. TTLs are revalidation hints per offline-sync-design.md: queue 5min, podcasts 30min, episodes 1hr. Stale data always served.
+  3. **Phase 2 readiness** — `savePlaybackPosition()` / `loadPlaybackPosition()` stubs exist. Phase 2 adds changelog key and calls from Now Playing view.
+  4. **Phase 3/4 compatibility** — Audio download uses separate Media module (no CacheManager impact). Sync engine will read/write through CacheManager; key prefixes keep caching data separate.
+- **Cross-team update (2026-04-12):** Kaylee rewrote `HomeMenuView` with scrolling viewport, increased touch targets, pixel-based text truncation. Fixed 20+ strict-mode type errors across `PocketCastsPodcastService.mc` and `CacheManager.mc`. Build passes `-l 3` strict.
+

@@ -139,3 +139,41 @@ Created the full `YoCastsGarmin/` Connect IQ project with mock data service. The
 - **Mal (Architecture):** IPodcastService interface ready for service implementation. Dictionary models align with API response structure.
 - **Zoe (Testing):** Fixtures available for UI logic testing without live API.
 - **Team:** Scaffolding complete and ready for real API integration.
+
+---
+
+## Phase 1 Offline Caching — Decorator Pattern with Read-Through Cache (2026-04-12)
+
+**Author:** Kaylee (Garmin Dev)  
+**Status:** Implemented  
+**Affects:** Mal (Lead), Wash (API Dev)
+
+### Context
+
+Mal's `docs/offline-sync-design.md` defines a 4-phase offline strategy. Phase 1 is metadata caching — enabling users to browse podcasts, episodes, and the queue even when the phone is out of range.
+
+### What Was Built
+
+1. **`CacheManager.mc` (module):** Wraps `Application.Storage` with typed save/load methods. Keys prefixed `"yc_"` to avoid collisions with future changelog/auth data. Every entry stores a `cachedAt` timestamp for TTL decisions. `clearCache()` calls `clearValues()` — safe in Phase 1 since auth lives in Properties.
+
+2. **`CachedPodcastService.mc` (decorator):** Wraps any `IPodcastService` via constructor injection. Loads cached data on init for instant UI. Delegates `fetchAll()` only when `phoneConnected == true`. Read-through getters cache fresh data on each view cycle. TTLs: queue 5min, podcasts 30min, episodes 1hr.
+
+3. **App wiring:** Real API mode: `CachedPodcastService(PocketCastsPodcastService(email, password))`. Mock mode: unwrapped `MockPodcastService()`.
+
+### Design Decisions
+
+1. **Module vs class for CacheManager** — Module chosen. No instance state; all functions operate on Storage directly.
+2. **Read-through caching** — Async callbacks impractical to intercept. Getters check wrapped service each view cycle, cache when new data detected. `_refreshPending` flag prevents redundant writes.
+3. **TTLs are revalidation hints, not expiry** — Per Mal's design: stale data always served, TTLs only trigger network refresh.
+4. **`clearValues()` for `clearCache()`** — Phase 1 only. Must become selective when changelog/auth tokens are added.
+
+### Impact on Future Phases
+
+- **Phase 2 (Position Tracking):** `savePlaybackPosition()` / `loadPlaybackPosition()` already implemented. Phase 2 adds changelog key and calls from Now Playing view.
+- **Phase 3 (Audio Download):** No impact — audio uses separate Media module storage.
+- **Phase 4 (Reconciliation):** Sync engine reads/writes through CacheManager. Key prefixes keep caching separate from sync data.
+
+### Open Questions
+
+- Exact `Application.Storage` size limit on Venu 4 41mm — needs hardware testing.
+- Whether `clearValues()` needs to become selective once changelog/auth keys are added.
