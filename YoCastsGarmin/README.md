@@ -59,17 +59,28 @@ See [Generating a developer key](#generating-a-developer-key) above. The Monkey 
 
 ## Building
 
+YoCasts uses a **dual-build configuration** because the CIQ simulator cannot run `audio-content-provider-app` types (Garmin platform limitation). Two jungle files select the right app entry point and manifest:
+
+| Build | Jungle file | Manifest | App type | Entry point |
+|-------|------------|----------|----------|-------------|
+| **Simulator** | `monkey.simulator.jungle` | `manifest.simulator.xml` | `watch-app` (AppBase) | `getInitialView()` |
+| **Device** | `monkey.jungle` | `manifest.xml` | `audio-content-provider-app` | `getPlaybackConfigurationView()` |
+
+All UI code (views, services, models) is shared. Only the app entry point and media stubs differ.
+
 ### Command line
 
 From the `YoCastsGarmin/` directory:
 
 ```bash
-monkeyc -d venu2 -f monkey.jungle -o bin/YoCasts.prg -y /path/to/developer_key.der
+# Simulator build (for UI development & testing)
+monkeyc -d venu441mm -f monkey.simulator.jungle -o bin/YoCasts.prg -y /path/to/developer_key.der -l 3
+
+# Device build (for real hardware with audio support)
+monkeyc -d venu441mm -f monkey.jungle -o bin/YoCasts.prg -y /path/to/developer_key.der -l 3
 ```
 
-Replace `venu2` with any supported device ID from `manifest.xml` (e.g. `venu3`, `fr265`, `fenix7`).
-
-> **Note:** The Venu 4 device ID may not be available in the SDK yet. Use `venu3s` (41mm equivalent) or the closest available profile until Garmin adds Venu 4 support.
+> **Tip:** Use the simulator build for day-to-day UI work. Switch to the device build only when deploying to hardware or testing audio/media features.
 
 ### VS Code
 
@@ -78,9 +89,13 @@ Replace `venu2` with any supported device ID from `manifest.xml` (e.g. `venu3`, 
 3. Press **Ctrl+Shift+B** (or **Cmd+Shift+B** on macOS) to run the default build task.
 4. Select your target device when prompted.
 
+> **Note:** VS Code uses `monkey.jungle` by default. To build the simulator variant, either configure a custom build task or use the command line.
+
 ---
 
 ## Running in the Simulator
+
+> **Important:** Use the **simulator build** (`monkey.simulator.jungle`) for the CIQ simulator. The device build (`audio-content-provider-app`) cannot run in the simulator.
 
 ### Starting the simulator
 
@@ -94,15 +109,18 @@ Or use the VS Code command palette: **Monkey C: Start Simulator**.
 ### Loading the app
 
 ```bash
-# After building, push the .prg to the simulator
-monkeydo bin/YoCasts.prg venu2
+# Option 1: Use the deploy helper script (recommended)
+deploy-sim.bat                                    # defaults: venu441mm, developer_key
+deploy-sim.bat venu441mm /path/to/developer_key
+
+# Option 2: Manual build and deploy with settings
+monkeyc -d venu441mm -f monkey.simulator.jungle -o bin/YoCasts.prg -y /path/to/developer_key -l 3
+monkeydo bin/YoCasts.prg venu441mm /a bin/YoCasts-settings.json 0:/GARMIN/APPS/YoCasts-settings.json
 ```
 
-Or in VS Code: press **F5** to build, launch the simulator, and load the app automatically.
+> **Settings in the simulator:** The `monkeydo` tool does **not** automatically deploy the `-settings.json` file that the compiler generates alongside the `.prg`. You must explicitly push it using the `/a` (additional files) flag as shown above. Without this, the simulator will show *"No settings file found for this app"* when you try to edit Application.Properties data via **File → Edit Persistent Storage → Edit Application.Properties Data**.
 
-### Device profile
-
-Use the **Venu 2** (or **Venu 3S** for the 41mm form factor) simulator profile. Select it in the simulator via **File → Device** or by passing the device ID to `monkeydo`.
+Or in VS Code: press **F5** to build, launch the simulator, and load the app automatically (the Monkey C extension handles settings deployment for you).
 
 ---
 
@@ -128,8 +146,10 @@ If the app is published to the Connect IQ Store, you can install it directly fro
 
 ```
 YoCastsGarmin/
-├── manifest.xml                  # App metadata, permissions, supported devices
-├── monkey.jungle                 # Build configuration (project manifest)
+├── manifest.xml                  # Device manifest (audio-content-provider-app)
+├── manifest.simulator.xml        # Simulator manifest (watch-app)
+├── monkey.jungle                 # Device build config (includes media stubs)
+├── monkey.simulator.jungle       # Simulator build config (no media)
 ├── resources/
 │   ├── drawables/
 │   │   ├── drawables.xml         # Drawable resource definitions
@@ -140,7 +160,14 @@ YoCastsGarmin/
 │   └── strings/
 │       └── strings.xml           # Localized string resources
 └── source/
-    ├── YoCastsApp.mc             # App entry point — lifecycle, auth check, home menu
+    ├── app/
+    │   └── YoCastsApp.mc         # Device entry — AudioContentProviderApp
+    ├── sim/
+    │   └── YoCastsApp.mc         # Simulator entry — AppBase (watch-app)
+    ├── media/
+    │   ├── YoCastsContentDelegate.mc   # Media playback delegate (device only)
+    │   ├── YoCastsContentIterator.mc   # Content iterator (device only)
+    │   └── YoCastsSyncDelegate.mc      # Sync delegate (device only)
     ├── models/
     │   └── DataModels.mc         # Data key constants & formatting helpers
     ├── services/

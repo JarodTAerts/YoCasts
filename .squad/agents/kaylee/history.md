@@ -200,3 +200,10 @@
   4. **CacheManager.clearCache() safety fix:** Replaced `clearValues()` with selective `deleteValue()` calls for known cache keys, protecting ChangeLog entries and future auth storage from accidental wipe.
   Build passes clean at `-l 3` strict.
 - **Learned:** `System.getDeviceSettings().connectionAvailable` returns true if ANY internet path exists (Wi-Fi OR Bluetooth proxy). This is the correct primary check for "can make HTTP requests." Using `phoneConnected` alone misses Wi-Fi direct connectivity. Using `phoneConnected || connectionAvailable` is redundant — `connectionAvailable` alone suffices.
+- **Simulator settings bug fix (2026-07-15):** Investigated and fixed "No settings file found for this app" error in CIQ simulator.
+  - **Root cause:** `monkeydo` does NOT automatically deploy the `*-settings.json` file that `monkeyc` generates alongside the `.prg`. It only auto-detects and deploys the `.debug.xml` file. The VS Code Monkey C extension handles this automatically via its Debug Adapter Protocol integration, but CLI usage requires explicit deployment.
+  - **Fix:** Use monkeydo's `/a` (additional files) flag: `monkeydo bin/YoCasts.prg venu441mm /a bin/YoCasts-settings.json 0:/GARMIN/APPS/YoCasts-settings.json`
+  - **How it works:** `ShellUtils.pushPrg()` pushes PRGs to `0:/GARMIN/APPS/<name>`. For additional files ending in `-settings.json`, `MonkeyDoDeux` uppercases the app-name portion before pushing to the simulator's virtual filesystem.
+  - **Created:** `deploy-sim.bat` helper script that wraps build + deploy with settings in one command.
+  - **Updated:** README.md with correct monkeydo syntax and explanation of the `/a` flag requirement.
+- **Learned:** The CIQ simulator uses a virtual filesystem with paths like `0:/GARMIN/APPS/` (PRGs), `0:/GARMIN/Debug/` (debug XML). Settings files must be explicitly pushed to `0:/GARMIN/APPS/<APPNAME>-settings.json` (uppercased). The monkeydo `/a` flag takes pairs of args: `<source> <dest>` (bat joins them with `;` internally).
