@@ -5,6 +5,46 @@
 - **Stack:** Garmin Connect IQ (Monkey C), with existing C#/.NET API reverse-engineering code as reference
 - **Created:** 2026-04-11
 
+## Core Context
+
+**Current Status (2026-04-14):** API surface finalized and live-tested. Two-token OAuth2 flow documented and validated. Audio download research complete with CDN behavior confirmed. Ready for Phase B (sync engine) implementation.
+
+**PocketCasts API Surface (Validated 2026-04-12):**
+- **Auth endpoints:** `/user/login` (legacy, no refresh), `/user/login_pocket_casts` (OAuth2, full lifecycle)
+- **Token refresh:** `POST /user/token` with `{grantType: "refresh_token", refreshToken: "..."}` body (not Authorization header)
+- **Queue:** `GET /up_next/list` (returns `{order: [...], episodes: {uuid: {...}}}`)
+- **Sync:** `POST /sync/update_episode` (per-episode playback position + status)
+- **Metadata:** `/user/podcast/episodes` (status only, no titles), `POST /user/episode` (full episode), `/user/in_progress` (bulk reconciliation source)
+- **20/25 confirmed working**, 5 errors (404, 400, 401 without token)
+
+**Auth Flow (finalized):**
+1. On-device credentials stored in Application.Properties (set via Garmin Connect Mobile)
+2. Login via `/user/login_pocket_casts` with {email, password}
+3. Response returns: accessToken, refreshToken, expiresIn, uuid, email
+4. Before each API call: check expiry, proactively refresh via `/user/token` with refreshToken
+5. On refresh failure (invalid_grant): re-login with stored credentials
+6. On 401: attempt refresh, then re-login, then show error
+
+**Audio Download Mechanics (live-tested 7 episodes, 7 CDNs):**
+- Episode URLs are original RSS feed URLs (not PocketCasts proxied)
+- All CDNs support Range headers (206 Partial Content) — resumable downloads fully supported
+- No authentication needed for audio (Bearer token only for metadata API)
+- URLs may redirect 1-6 times through analytics before reaching CDN
+- SupportingCast premium URLs embed JWT with timestamp — re-fetch before download
+- API `size` field unreliable (often "0" string, doesn't match Content-Length) — issue HEAD request for real size
+- File sizes: 18.8 MB to 242.5 MB (average ~1 MB/min of audio)
+
+**Garmin Implementation Considerations:**
+- Garmin's `makeWebRequest()` transparently uses device's transport (Wi-Fi or phone BT proxy)
+- Follows HTTP redirects natively (no manual redirect handling needed)
+- Audio download via SyncDelegate with HTTP_RESPONSE_CONTENT_TYPE_AUDIO header
+- No parallel downloads — sequential only, 64 KB memory budget for SyncDelegate (~15 KB usable)
+
+**Documentation & Testing:**
+- `docs/pocketcasts-api-reference.md` (30+ endpoints, 20 confirmed)
+- `docs/pocketcasts-audio-download-research.md` (CDN behavior, redirect analysis, size estimates)
+- `PocketcastsApiTesting/` (C# .NET 8 test harness, interactive menu, response logging to test-results/)
+
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->

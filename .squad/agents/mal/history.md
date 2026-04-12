@@ -5,6 +5,42 @@
 - **Stack:** Garmin Connect IQ (Monkey C), with existing C#/.NET API reverse-engineering code as reference
 - **Created:** 2026-04-11
 
+## Core Context
+
+**Current Status (2026-04-14):** Architecture is stable. App type migrated to AudioContentProviderApp for native audio playback. Home menu redesigned with split-dock layout. Five implementation phases approved: Phase 0 (simulator validation), Phase A (changelog), Phase B (sync engine), Phase C (audio download), Phase D (media playback), Phase E (polish).
+
+**Key Architectural Decisions (stable):**
+1. **App type:** AudioContentProviderApp (instead of AppBase) — enables Media module APIs for audio playback. Inherits AppBase, all View/UI code survives.
+2. **UI framework:** Menu2 for list views (Queue, Podcasts, Episodes). Custom HomeMenuView for home screen (split-dock: scrollable pills + fixed Now Playing).
+3. **Data models:** Dictionary instances, not classes. Matches JSON structure from API responses.
+4. **Auth:** Two-endpoint OAuth2 flow — `POST /user/login_pocket_casts` (returns accessToken + refreshToken), `POST /user/token` with `{grantType: refresh_token, refreshToken}` for proactive refresh.
+5. **Connectivity:** Three-state model (Wi-Fi / Phone BT / Offline). `connectionAvailable` check supports both transports transparently.
+6. **Offline sync:** Push-then-pull protocol, 7-step state machine. Changelog in storage, position tracking at 15s intervals, automatic download on Wi-Fi with battery guards.
+7. **Audio download:** Via SyncDelegate + makeWebRequest with HTTP_RESPONSE_CONTENT_TYPE_AUDIO. Sequential (not parallel), no resume in v1.
+8. **Device target:** Venu 4 41mm only (390×390, 768 KB memory, capacitive touch).
+
+**API Surface Finalized:**
+- Queue: `/up_next/list` (returns {order, episodes})
+- Sync: `/sync/update_episode` (per-episode position updates)
+- Auth: `/user/login_pocket_casts`, `/user/token`
+- Metadata: `/user/podcast/episodes`, `/user/episode`, `/user/in_progress`
+
+**Implementation Status:**
+- Phase 0 (simulator): Pending — awaiting AudioContentProviderApp prototype
+- Phase 1 (metadata caching): COMPLETE — CacheManager + CachedPodcastService live
+- Phase 2 (position tracking): Stubs in place, ready for Phase 0 gate
+- Phase 3 (audio download): Unblocked, design finalized
+- Phase 4 (playback): Design finalized, depends on Phase 3
+- Phase 5 → Phase E (polish): Reconciliation + interface refinement
+
+**Documentation:**
+- `garmin-ux-spec.md` (v2.0) — UX design with split-dock home menu, 7 screens
+- `garmin-app-implementation-guide.md` (v2.0) — Architecture, file structure, phases
+- `offline-sync-design.md` (v1.2) — 7-step sync state machine, Wi-Fi + BT dual transport
+- `audio-download-implementation-plan.md` — Step-by-step Phase A-E blueprint
+- `app-type-migration-evaluation.md` — AudioContentProviderApp validation
+- `pocketcasts-api-reference.md` — 30+ endpoints, 20 confirmed working
+
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->

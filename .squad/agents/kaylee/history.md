@@ -5,6 +5,39 @@
 - **Stack:** Garmin Connect IQ (Monkey C), with existing C#/.NET API reverse-engineering code as reference
 - **Created:** 2026-04-11
 
+## Core Context
+
+**Current Status (2026-04-14):** Garmin app scaffolding complete. Phase 1 offline caching live. Home menu redesigned with split-dock layout — build passes strict linting. Simulator and physical hardware testing pending for Phase 0.
+
+**UI Architecture (finalized):**
+1. **App type:** AudioContentProviderApp — enables Music widget entry point + Garmin native playback controls.
+2. **Home screen:** Custom HomeMenuView with split-dock design (Y=0–260: scrollable Queue/Podcasts/Settings pills; Y=260–390: fixed Now Playing dock).
+3. **List screens:** Menu2 for Queue, Podcasts, Episodes (auto-scaling layout for round/rectangular displays).
+4. **Now Playing:** Full-screen episode info view with artwork, progress bar, timestamps, play/pause button.
+5. **Settings:** Placeholder screen for future playback speed, auto-download toggles.
+
+**Device Target:**
+- Venu 4 41mm only (390×390 AMOLED, capacitive touch + 2 buttons, 768 KB memory)
+- Modern SDK (4.2+) enables rich caching and custom drawing
+
+**Offline & Sync (Phase 1 complete):**
+- CacheManager module wraps Application.Storage with typed save/load, 'yc_' key prefixes, cachedAt timestamps
+- CachedPodcastService decorator wraps IPodcastService, loads cached data on init, delegates fetchAll() only on phone connection
+- TTLs: queue 5min, podcasts 30min, episodes 1hr (revalidation hints, stale data always served)
+- Phase 2 adds position tracking (15s intervals, adaptive battery scaling)
+- Phase 3 adds audio download (via SyncDelegate, sequential, no resume in v1)
+
+**Known Constraints & Workarounds:**
+- Menu2 cannot dynamically add items post-construction (episode lists show "Loading..." on first visit, require back-and-re-enter)
+- No podcast artwork in v1 (memory budget)
+- maxSdkVersion: 4.2.99 to allow future SDK versions without manifest edits
+
+**Completed Implementations:**
+- `HomeMenuView.mc` (split-dock with Y-based touch zones, scrolling viewport, 80px pills, 280px uniform width)
+- `CacheManager.mc` (module with typed getters/setters, clearValues() → selective delete in Phase 2)
+- `CachedPodcastService.mc` (decorator pattern, read-through TTL cache, offline instant UI)
+- `MockPodcastService.mc` (pre-loaded data for testing, IPodcastService interface contract)
+
 ## Learnings
 
 <!-- Append new learnings below. Each entry is something lasting about the project. -->
