@@ -98,6 +98,7 @@
 - **Service toggle implemented:** `YoCastsApp.mc` now reads `useMockData` boolean property (default: true) from `Application.Properties`. When false and credentials are present, instantiates `PocketCastsPodcastService`; otherwise falls back to `MockPodcastService`. Toggle accessible via Garmin Connect Mobile settings.
 - **All views decoupled from MockPodcastService:** Every view's type annotations changed from `MockPodcastService` to `IPodcastService`. Views now work with either service implementation. Menu2 views show "Loading..." when data isn't cached yet.
 - **Properties/settings updated:** Added `useMockData` boolean property (default true) with "Use Demo Data" toggle in settings UI. Existing email/password settings unchanged.
+- **Azure Function proxy for response size (2026-04-14):** Built `YoCastsProxy/` — a .NET 8 isolated worker Azure Function that acts as a transparent strip-and-forward proxy. Root cause: Garmin's `Communications.makeWebRequest()` has a hard ~32-44 KB response limit. The `/user/podcast/list` response is 43 KB for just 15 podcasts due to huge `description` and `descriptionHtml` fields. Solution: Whitelist-based field filtering on proxy (`uuid`, `title`, `author`, `artwork_url`, `author_color`, `duration`, `published_at`, `episodes_sort_order`, `num_episodes`, `last_sync_time`, `in_rotation`). Proxy forwards all `/api/pocketcasts/{*path}` requests with stateless Bearer token forwarding. No credential storage, no caching in v1, consumption tier for auto-scaling. Added to PodcastApp.sln. Build clean, no warnings. Documented in `.squad/decisions/inbox/wash-azure-proxy.md`. Ready for Kaylee integration.
 - **Connect IQ makeWebRequest patterns learned:** Callback methods must be public (even for internal use) because `method(:name)` references require it. `REQUEST_CONTENT_TYPE_JSON` is used in the `:headers` dict to signal JSON body serialization. Method names must not collide with instance variable names in Monkey C.
 - **Up Next queue data is minimal:** `/up_next/list` returns only title, url, and podcast UUID per episode — no duration, progress, or podcast title. Service enriches queue items by chaining `/user/episode` calls and looking up podcast titles from cached podcast list.
 - **Episode metadata gap confirmed in implementation:** `/user/podcast/episodes` returns no titles. Must call `/user/episode` individually for each episode to get display-ready data. Capped at 15 episodes per podcast to limit request volume.
@@ -131,3 +132,18 @@
   6. **System.println() logging** — Every API call, success/failure, and data count is logged with `YoCasts:` prefix for simulator console debugging.
   7. **Auth endpoint verified** — URL (`/user/login_pocket_casts`), request body (`{email, password, scope}`), response fields (`accessToken`, `refreshToken`, `expiresIn`), and token refresh (`/user/token` with `{grantType, refreshToken}` body, no Bearer header) all match live-tested API reference.
   8. **Garmin `connectionAvailable`** — Confirmed available in SDK 4.2.0+. Returns true for any internet path (phone BLE proxy OR direct Wi-Fi). Safe to use on Venu 4 41mm target.
+
+- **Azure Functions proxy built (2026-04-14):** Created `YoCastsProxy/` — .NET 8 isolated worker Azure Function that proxies PocketCasts API requests and strips heavy fields to keep responses under Garmin's ~32-44 KB `makeWebRequest` limit.
+  1. **Problem:** `/user/podcast/list` returns ~43 KB for 15 podcasts (error -402 NETWORK_RESPONSE_TOO_LARGE). Most of the weight is `description` and `descriptionHtml` fields.
+  2. **Solution:** Transparent strip-and-forward proxy. Garmin watch sends Bearer token → proxy forwards to PocketCasts → strips heavy fields → returns slim JSON.
+  3. **No credentials stored** — proxy is stateless. Auth token comes from the watch, which logs in directly to PocketCasts.
+  4. **Route:** `POST /api/pocketcasts/{*path}` mirrors PocketCasts API paths. Garmin app just changes base URL.
+  5. **Field stripping per endpoint:**
+     - `/user/podcast/list`: whitelist only uuid, title, author, lastEpisodePublished, unplayed, lastEpisodeUuid, folderUuid, sortPosition, dateAdded, url, episodesSortOrder (~43 KB → ~3-5 KB)
+     - `/up_next/list`: pass through as-is (already ~540 bytes)
+     - `/user/episode`: strip description, descriptionHtml, notes, showNotes
+     - All others: recursive strip of description/descriptionHtml
+  6. **Project structure:** `PocketCastsProxy.cs` (single function), `Program.cs` (HttpClient DI), `host.json`, `local.settings.json.example`, `README.md` with Azure deployment instructions.
+  7. **Build:** `dotnet build` — zero warnings, zero errors. Added to `PodcastApp.sln`.
+  8. **Deployment target:** Azure Consumption tier, anonymous auth level (relies on PocketCasts Bearer token for access control).
+  9. **Garmin integration:** Watch still authenticates directly to PocketCasts (`/user/login_pocket_casts`). Only subsequent data requests route through the proxy.

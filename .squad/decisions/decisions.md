@@ -1,5 +1,76 @@
 # Decision Log
 
+## Azure Function Proxy for PocketCasts API (2026-04-14)
+
+**By:** Wash (API Dev)  
+**Date:** 2026-04-14  
+**Affects:** Kaylee (Garmin Dev), Mal (Lead)
+
+### Context
+
+Garmin Connect IQ's `Communications.makeWebRequest()` has a hard ~32-44 KB response limit (error `-402 NETWORK_RESPONSE_TOO_LARGE`). Our `/user/podcast/list` response is 43 KB for just 15 podcasts because of huge `description` and `descriptionHtml` fields the watch doesn't need.
+
+### Decision
+
+Created `YoCastsProxy/` — a .NET 8 isolated worker Azure Function that acts as a transparent strip-and-forward proxy between the Garmin watch and PocketCasts API.
+
+**Key design choices:**
+1. **Stateless** — no credentials stored. Bearer token comes from the watch and is forwarded.
+2. **Whitelist approach for podcast list** — only 11 fields kept (uuid, title, author, etc.). This is more aggressive than blacklist but guarantees size.
+3. **Catch-all route** (`/api/pocketcasts/{*path}`) — mirrors PocketCasts paths so the Garmin app just changes base URL.
+4. **No caching** — keep it simple for v1. Could add Azure Cache for Redis later if needed.
+5. **Anonymous auth level** — the function itself has no auth gate; PocketCasts Bearer token provides access control.
+6. **Consumption tier** — scales to zero, minimal cost for personal use.
+
+### Impact on Garmin App
+
+Kaylee needs to:
+1. Add a configurable proxy base URL (could be an app property)
+2. Route data requests through the proxy instead of directly to PocketCasts
+3. Keep auth requests (`/user/login_pocket_casts`, `/user/token`) going directly to PocketCasts — the proxy is only for data endpoints
+
+### Alternatives Considered
+
+- **Client-side field filtering in Monkey C** — not possible, the response is too large to even receive
+- **Garmin companion app** — too complex, requires Android/iOS development
+- **Cloudflare Worker** — viable but .NET matches our stack
+
+---
+
+## Azure Function Proxy Integration — Garmin Side (2026-04-14)
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-04-14  
+**Affects:** Wash (API Dev), Mal (Lead), Jarod Aerts
+
+### Decision
+
+Garmin app now routes all data-fetching API calls through an Azure Function proxy (`PROXY_BASE` constant in `PocketCastsPodcastService.mc`). Login and token refresh remain direct to `api.pocketcasts.com`.
+
+### Rationale
+
+PocketCasts API responses (especially `/user/podcast/list` with full descriptions) can exceed the CIQ ~32KB `makeWebRequest()` response limit. The proxy strips heavy fields (`description`, `descriptionHtml`, etc.) before forwarding to the watch.
+
+### What Changed
+
+- Added `PROXY_BASE` constant alongside existing `API_BASE` in `PocketCastsPodcastService.mc`
+- `_makeAuthPost()` now uses `PROXY_BASE` for all data calls
+- Removed `:maxLength => 65536` option from proxy calls (proxy guarantees small responses)
+- Login (`_login()`) and token refresh (`_doTokenRefresh()`) still use `API_BASE` directly
+- Class docstring updated with proxy architecture explanation
+
+### Dependencies
+
+- **Wash/Jarod:** Azure Function must be deployed and `PROXY_BASE` URL updated in the code before real API testing
+- Proxy must forward `Authorization: Bearer {token}` header as-is
+- Proxy endpoints must mirror PocketCasts API paths (e.g., `/user/podcast/list`, `/up_next/list`, `/user/episode`)
+
+### Build Verification
+
+Build passes `monkeyc.bat -d venu441mm -f monkey.simulator.jungle -o bin\YoCasts.prg -l 3` (strict mode, zero errors).
+
+---
+
 ## AudioContentProviderApp Migration Complete — SDK Constraints & Implementation (2026-04-14)
 
 **By:** Kaylee (Garmin Dev)  
