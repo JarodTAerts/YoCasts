@@ -3,55 +3,73 @@ import Toybox.WatchUi;
 import Toybox.Graphics;
 import Toybox.System;
 import Toybox.Timer;
+import Toybox.Math;
 
-//! Custom home menu with tap-to-select pills and marquee text.
-//! Three items: Queue, Podcasts, Now Playing.
-//! Tap any item to navigate directly — no selection highlight.
-//! Swipe up/down or buttons scroll the list smoothly.
+//! Split-dock home menu (v2.0).
+//! Zone 1: Scrollable pill menu (Y=0–260) — Queue, Podcasts, Settings.
+//! Zone 2: Fixed Now Playing dock (Y=260–390) — playback info + play/pause.
 class HomeMenuView extends WatchUi.View {
 
     private var _service as IPodcastService;
     private var _isPlaying as Boolean = false;
     private var _scrollOffset as Number = 0;
 
-    // Cached screen Y positions for hit testing (set each onUpdate)
-    private var _queueScreenY as Number = 0;
-    private var _podScreenY as Number = 0;
-    private var _npScreenY as Number = 0;
-    private var _settingsScreenY as Number = 0;
-    private var _playBtnCx as Number = 0;
-    private var _playBtnCy as Number = 0;
+    // --- Layout constants from Section 5 spec ---
+    private const DOCK_TOP = 260;
+    private const DOCK_BOTTOM = 390;
+    private const DOCK_DIVIDER_Y = 260;
+    private const DOCK_PODCAST_Y = 268;
+    private const DOCK_EPISODE_Y = 302;
+    private const DOCK_PROGRESS_Y = 338;
+    private const DOCK_TIME_Y = 346;
+    private const DOCK_PLAYPAUSE_CY = 378;
+    private const DOCK_PLAYPAUSE_ZONE_TOP = 365;
+    private const PROGRESS_BAR_WIDTH = 200;
+    private const PROGRESS_BAR_HEIGHT = 4;
 
-    // Layout metrics for 390x390 round AMOLED
-    private var _pillH as Number = 68;
-    private var _npH as Number = 105;
-    private var _settingsH as Number = 52;
-    private var _gap as Number = 14;
-    private var _margin as Number = 28;
-    private var _viewportTop as Number = 55;
-    private var _viewportH as Number = 310;
-    private var _scrollStep as Number = 60;
-    private var _pillR as Number = 16;
-    private var _contentHeight as Number = 0;
+    // Content-space Y for the title (scrolls with pills)
+    private const TITLE_Y = 25;
+
+    private const PILL_HEIGHT = 80;
+    private const PILL_GAP = 16;
+    private const PILL_CORNER_RADIUS = 16;
+    private const PILL_INNER_PAD_X = 16;
+
+    // Uniform pill sizing — all pills identical width, centered
+    private const PILL_WIDTH = 280;
+    private const PILL_X = 55; // (390 - 280) / 2
+
+    // Content-space Y positions for each pill
+    private const QUEUE_Y = 80;
+    private const PODCASTS_Y = 176;    // 80 + 80 + 16
+    private const DOWNLOADS_Y = 272;   // 176 + 80 + 16
+    private const SETTINGS_Y = 368;    // 272 + 80 + 16
+
+    private const SCROLL_STEP = 80;
+    private const TOTAL_MENU_HEIGHT = 478; // 368 + 80 + 30 bottom pad
+
+    // Dock text max widths
+    private const DOCK_PODCAST_MAX_W = 322;
+    private const DOCK_EPISODE_MAX_W = 286;
+
     private var _maxScroll as Number = 0;
 
-    // Marquee state for NP episode title
+    // Marquee state for dock podcast name
     private var _marqueeTimer as Timer.Timer? = null;
-    private var _npTitleOffset as Number = 0;
-    private var _npTitleMaxScroll as Number = 0;
-    private var _npTitlePhase as Number = 0;
-    private var _npTitlePause as Number = 15;
-    // Marquee state for NP podcast subtitle
-    private var _npSubOffset as Number = 0;
-    private var _npSubMaxScroll as Number = 0;
-    private var _npSubPhase as Number = 0;
-    private var _npSubPause as Number = 15;
+    private var _dockPodOffset as Number = 0;
+    private var _dockPodMaxScroll as Number = 0;
+    private var _dockPodPhase as Number = 0;
+    private var _dockPodPause as Number = 15;
+    // Marquee state for dock episode title
+    private var _dockEpOffset as Number = 0;
+    private var _dockEpMaxScroll as Number = 0;
+    private var _dockEpPhase as Number = 0;
+    private var _dockEpPause as Number = 15;
 
     function initialize(service as IPodcastService) {
         View.initialize();
         _service = service;
-        _contentHeight = _pillH + _gap + _pillH + _gap + _npH + _gap + _settingsH + 15;
-        _maxScroll = _contentHeight - _viewportH;
+        _maxScroll = TOTAL_MENU_HEIGHT - DOCK_TOP;
         if (_maxScroll < 0) { _maxScroll = 0; }
     }
 
@@ -68,53 +86,53 @@ class HomeMenuView extends WatchUi.View {
         }
     }
 
-    //! Marquee timer callback — animates overflowing text
+    //! Marquee timer callback — animates overflowing dock text
     function onMarqueeTick() as Void {
         var needsUpdate = false;
 
-        // NP title track
-        if (_npTitleMaxScroll > 0) {
-            if (_npTitlePhase == 0) {
-                _npTitlePause = _npTitlePause - 1;
-                if (_npTitlePause <= 0) { _npTitlePhase = 1; }
-            } else if (_npTitlePhase == 1) {
-                _npTitleOffset = _npTitleOffset + 2;
+        // Dock podcast name track
+        if (_dockPodMaxScroll > 0) {
+            if (_dockPodPhase == 0) {
+                _dockPodPause = _dockPodPause - 1;
+                if (_dockPodPause <= 0) { _dockPodPhase = 1; }
+            } else if (_dockPodPhase == 1) {
+                _dockPodOffset = _dockPodOffset + 2;
                 needsUpdate = true;
-                if (_npTitleOffset >= _npTitleMaxScroll) {
-                    _npTitleOffset = _npTitleMaxScroll;
-                    _npTitlePhase = 2;
-                    _npTitlePause = 10;
+                if (_dockPodOffset >= _dockPodMaxScroll) {
+                    _dockPodOffset = _dockPodMaxScroll;
+                    _dockPodPhase = 2;
+                    _dockPodPause = 10;
                 }
             } else {
-                _npTitlePause = _npTitlePause - 1;
-                if (_npTitlePause <= 0) {
-                    _npTitleOffset = 0;
-                    _npTitlePhase = 0;
-                    _npTitlePause = 15;
+                _dockPodPause = _dockPodPause - 1;
+                if (_dockPodPause <= 0) {
+                    _dockPodOffset = 0;
+                    _dockPodPhase = 0;
+                    _dockPodPause = 15;
                     needsUpdate = true;
                 }
             }
         }
 
-        // NP subtitle track
-        if (_npSubMaxScroll > 0) {
-            if (_npSubPhase == 0) {
-                _npSubPause = _npSubPause - 1;
-                if (_npSubPause <= 0) { _npSubPhase = 1; }
-            } else if (_npSubPhase == 1) {
-                _npSubOffset = _npSubOffset + 2;
+        // Dock episode title track
+        if (_dockEpMaxScroll > 0) {
+            if (_dockEpPhase == 0) {
+                _dockEpPause = _dockEpPause - 1;
+                if (_dockEpPause <= 0) { _dockEpPhase = 1; }
+            } else if (_dockEpPhase == 1) {
+                _dockEpOffset = _dockEpOffset + 2;
                 needsUpdate = true;
-                if (_npSubOffset >= _npSubMaxScroll) {
-                    _npSubOffset = _npSubMaxScroll;
-                    _npSubPhase = 2;
-                    _npSubPause = 10;
+                if (_dockEpOffset >= _dockEpMaxScroll) {
+                    _dockEpOffset = _dockEpMaxScroll;
+                    _dockEpPhase = 2;
+                    _dockEpPause = 10;
                 }
             } else {
-                _npSubPause = _npSubPause - 1;
-                if (_npSubPause <= 0) {
-                    _npSubOffset = 0;
-                    _npSubPhase = 0;
-                    _npSubPause = 15;
+                _dockEpPause = _dockEpPause - 1;
+                if (_dockEpPause <= 0) {
+                    _dockEpOffset = 0;
+                    _dockEpPhase = 0;
+                    _dockEpPause = 15;
                     needsUpdate = true;
                 }
             }
@@ -125,302 +143,335 @@ class HomeMenuView extends WatchUi.View {
         }
     }
 
-    function onUpdate(dc as Graphics.Dc) as Void {
-        var w = dc.getWidth();
-        var cx = w / 2;
-        var pillW = w - _margin * 2;
+    //! Compute usable circle width at a given Y position on 390x390 round display
+    private function getWidthAtY(y as Number) as Number {
+        var dy = y - 195;
+        if (dy < -195 || dy > 195) { return 0; }
+        var r2 = 195 * 195;
+        var w = Math.sqrt(r2 - dy * dy).toNumber() * 2;
+        return w;
+    }
 
+    //! Compute left margin at a given Y position
+    private function getMarginAtY(y as Number) as Number {
+        return (390 - getWidthAtY(y)) / 2;
+    }
+
+    // ========================================================================
+    // DRAW ORDER (Section 5.8)
+    // ========================================================================
+
+    function onUpdate(dc as Graphics.Dc) as Void {
+        var cx = 195;
+
+        // 1. Clear screen (black)
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
 
-        // Fixed title area
+        // 2. Set clip to scrollable zone (0 to dock top)
+        dc.setClip(0, 0, 390, DOCK_TOP);
+
+        // 3. Draw "YoCasts" title — scrolls with content
+        var titleDrawY = TITLE_Y - _scrollOffset;
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, 28, Graphics.FONT_MEDIUM, "YoCasts",
-                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-        dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
-        dc.drawLine(cx - 40, 46, cx + 40, 46);
+        dc.drawText(cx, titleDrawY, Graphics.FONT_MEDIUM, "YoCasts",
+                    Graphics.TEXT_JUSTIFY_CENTER);
 
-        // Compute screen positions from scroll offset
-        _queueScreenY = _viewportTop - _scrollOffset;
-        _podScreenY = _queueScreenY + _pillH + _gap;
-        _npScreenY = _podScreenY + _pillH + _gap;
-        _settingsScreenY = _npScreenY + _npH + _gap;
+        // 4. Draw menu pills adjusted for scroll offset
+        drawMenuPills(dc, cx);
 
-        // Clip to scroll viewport
-        dc.setClip(0, _viewportTop, w, _viewportH);
+        // 5. Clear clip
+        dc.clearClip();
+
+        // 6. Draw scroll indicators
+        drawScrollIndicators(dc, cx);
+
+        // 7–12. Draw dock
+        drawDock(dc, cx);
+    }
+
+    // --- Scrollable Menu Pills (Zone 1) ---
+
+    private function drawMenuPills(dc as Graphics.Dc, cx as Number) as Void {
+        var queueDrawY = QUEUE_Y - _scrollOffset;
+        var podDrawY = PODCASTS_Y - _scrollOffset;
+        var dlDrawY = DOWNLOADS_Y - _scrollOffset;
+        var settDrawY = SETTINGS_Y - _scrollOffset;
 
         // Queue pill
-        if (_queueScreenY + _pillH > _viewportTop && _queueScreenY < _viewportTop + _viewportH) {
-            drawPillBg(dc, _margin, _queueScreenY, pillW, _pillH, _pillR);
-            drawQueueContent(dc, _margin, _queueScreenY, pillW, _pillH, cx);
+        if (queueDrawY + PILL_HEIGHT > 0 && queueDrawY < DOCK_TOP) {
+            drawPillBg(dc, PILL_X, queueDrawY, PILL_WIDTH, PILL_HEIGHT);
+            drawQueueContent(dc, PILL_X, queueDrawY);
         }
 
         // Podcasts pill
-        if (_podScreenY + _pillH > _viewportTop && _podScreenY < _viewportTop + _viewportH) {
-            drawPillBg(dc, _margin, _podScreenY, pillW, _pillH, _pillR);
-            drawPodcastsContent(dc, _margin, _podScreenY, pillW, _pillH, cx);
+        if (podDrawY + PILL_HEIGHT > 0 && podDrawY < DOCK_TOP) {
+            drawPillBg(dc, PILL_X, podDrawY, PILL_WIDTH, PILL_HEIGHT);
+            drawPodcastsContent(dc, PILL_X, podDrawY);
         }
 
-        // Now Playing pill
-        if (_npScreenY + _npH > _viewportTop && _npScreenY < _viewportTop + _viewportH) {
-            drawNowPlayingPill(dc, _margin, _npScreenY, pillW, _npH, _pillR, cx, w);
+        // Downloads pill
+        if (dlDrawY + PILL_HEIGHT > 0 && dlDrawY < DOCK_TOP) {
+            drawPillBg(dc, PILL_X, dlDrawY, PILL_WIDTH, PILL_HEIGHT);
+            drawDownloadsContent(dc, PILL_X, dlDrawY);
         }
 
         // Settings pill
-        if (_settingsScreenY + _settingsH > _viewportTop && _settingsScreenY < _viewportTop + _viewportH) {
-            drawSettingsPill(dc, _margin, _settingsScreenY, pillW, _settingsH, _pillR, cx);
-        }
-
-        dc.clearClip();
-
-        if (_maxScroll > 0) {
-            drawScrollIndicator(dc, w);
+        if (settDrawY + PILL_HEIGHT > 0 && settDrawY < DOCK_TOP) {
+            drawPillBg(dc, PILL_X, settDrawY, PILL_WIDTH, PILL_HEIGHT);
+            drawSettingsContent(dc, PILL_X, settDrawY);
         }
     }
-
-    // --- Pill Background (uniform, no selection highlight) ---
 
     private function drawPillBg(dc as Graphics.Dc, x as Number, y as Number,
-                                 w as Number, h as Number, r as Number) as Void {
+                                 w as Number, h as Number) as Void {
         dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
-        dc.fillRoundedRectangle(x, y, w, h, r);
+        dc.fillRoundedRectangle(x, y, w, h, PILL_CORNER_RADIUS);
     }
 
-    // --- Queue Content ---
-
-    private function drawQueueContent(dc as Graphics.Dc, x as Number, y as Number,
-                                       w as Number, h as Number, cx as Number) as Void {
+    private function drawQueueContent(dc as Graphics.Dc, pillX as Number, pillY as Number) as Void {
         var queue = _service.getQueue();
         var count = queue.size();
 
-        var iconX = x + 28;
-        var iconY = y + h / 2;
-        drawMusicNote(dc, iconX, iconY);
+        // Icon vertically centered for two-line content
+        drawMusicNote(dc, pillX + PILL_INNER_PAD_X, pillY + 16);
 
-        var textX = cx + 8;
+        var textX = pillX + 48;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(textX, y + h / 2 - 12, Graphics.FONT_SMALL, "Queue",
-                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.drawText(textX, pillY + 14, Graphics.FONT_SMALL, "Queue",
+                    Graphics.TEXT_JUSTIFY_LEFT);
 
-        dc.setColor(0x999999, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(textX, y + h / 2 + 14, Graphics.FONT_XTINY,
+        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(textX, pillY + 44, Graphics.FONT_XTINY,
                     count.toString() + " episodes",
-                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+                    Graphics.TEXT_JUSTIFY_LEFT);
     }
 
-    // --- Podcasts Content ---
-
-    private function drawPodcastsContent(dc as Graphics.Dc, x as Number, y as Number,
-                                          w as Number, h as Number, cx as Number) as Void {
+    private function drawPodcastsContent(dc as Graphics.Dc, pillX as Number, pillY as Number) as Void {
         var podcasts = _service.getSubscribedPodcasts();
         var count = podcasts.size();
 
-        var iconX = x + 28;
-        var iconY = y + h / 2;
-        drawHeadphones(dc, iconX, iconY);
+        drawHeadphones(dc, pillX + PILL_INNER_PAD_X, pillY + 16);
 
-        var textX = cx + 8;
+        var textX = pillX + 48;
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(textX, y + h / 2 - 12, Graphics.FONT_SMALL, "Podcasts",
-                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.drawText(textX, pillY + 14, Graphics.FONT_SMALL, "Podcasts",
+                    Graphics.TEXT_JUSTIFY_LEFT);
 
-        dc.setColor(0x999999, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(textX, y + h / 2 + 14, Graphics.FONT_XTINY,
+        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(textX, pillY + 44, Graphics.FONT_XTINY,
                     count.toString() + " subscriptions",
-                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+                    Graphics.TEXT_JUSTIFY_LEFT);
     }
 
-    // --- Now Playing Pill ---
+    private function drawSettingsContent(dc as Graphics.Dc, pillX as Number, pillY as Number) as Void {
+        // Single line — vertically centered in pill
+        drawGearIcon(dc, pillX + PILL_INNER_PAD_X, pillY + 24);
 
-    private function drawNowPlayingPill(dc as Graphics.Dc, x as Number, y as Number,
-                                         w as Number, h as Number, r as Number,
-                                         cx as Number, screenW as Number) as Void {
-        dc.setColor(0x162038, Graphics.COLOR_TRANSPARENT);
-        dc.fillRoundedRectangle(x, y, w, h, r);
+        var textX = pillX + 48;
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(textX, pillY + 22, Graphics.FONT_SMALL, "Settings",
+                    Graphics.TEXT_JUSTIFY_LEFT);
+    }
 
-        // Accent top border
-        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        dc.setPenWidth(2);
-        dc.drawLine(x + r, y, x + w - r, y);
-        dc.setPenWidth(1);
+    private function drawDownloadsContent(dc as Graphics.Dc, pillX as Number, pillY as Number) as Void {
+        var count = DownloadQueue.getDownloadCount();
+
+        drawDownloadIcon(dc, pillX + PILL_INNER_PAD_X, pillY + 16);
+
+        var textX = pillX + 48;
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(textX, pillY + 14, Graphics.FONT_SMALL, "Downloads",
+                    Graphics.TEXT_JUSTIFY_LEFT);
+
+        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
+        var subtitle = count.toString() + " episode";
+        if (count != 1) { subtitle = subtitle + "s"; }
+        dc.drawText(textX, pillY + 44, Graphics.FONT_XTINY, subtitle,
+                    Graphics.TEXT_JUSTIFY_LEFT);
+    }
+
+    // --- Now Playing Dock (Zone 2, Y=260–390) ---
+
+    private function drawDock(dc as Graphics.Dc, cx as Number) as Void {
+        // 6. Draw dock background (solid black, Y=260–390)
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
+        dc.fillRectangle(0, DOCK_TOP, 390, DOCK_BOTTOM - DOCK_TOP);
+
+        // 7. Draw dock divider line
+        var divMargin = getMarginAtY(DOCK_DIVIDER_Y);
+        var divWidth = getWidthAtY(DOCK_DIVIDER_Y);
+        dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
+        dc.fillRectangle(divMargin, DOCK_DIVIDER_Y, divWidth, 1);
 
         var ep = _service.getNowPlaying();
         if (ep == null) {
+            // No episode playing — show placeholder
             dc.setColor(0x666666, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(cx, y + h / 2, Graphics.FONT_SMALL, "Nothing playing",
-                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-            _npTitleMaxScroll = 0;
-            _npSubMaxScroll = 0;
+            dc.drawText(cx, DOCK_EPISODE_Y, Graphics.FONT_XTINY, "No episode",
+                        Graphics.TEXT_JUSTIFY_CENTER);
+            _dockPodMaxScroll = 0;
+            _dockEpMaxScroll = 0;
             return;
         }
 
-        var epTitle = ep[DataKeys.E_TITLE] as String;
         var podTitle = ep[DataKeys.E_PODCAST_TITLE] as String;
+        var epTitle = ep[DataKeys.E_TITLE] as String;
         var duration = ep[DataKeys.E_DURATION] as Number;
         var playedUpTo = ep[DataKeys.E_PLAYED_UP_TO] as Number;
 
-        var textPad = 14;
-        var containerX = x + textPad;
-        var containerW = w - textPad * 2;
+        // 8. Draw podcast name (Y=268)
+        drawDockMarqueeText(dc, podTitle, Graphics.FONT_XTINY,
+                            0xAAAAAA, cx, DOCK_PODCAST_Y,
+                            DOCK_PODCAST_MAX_W, _dockPodOffset, false);
 
-        // "NOW PLAYING" label
-        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, y + 12, Graphics.FONT_XTINY, "NOW PLAYING",
-                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        // 9. Draw episode title (Y=302)
+        drawDockMarqueeText(dc, epTitle, Graphics.FONT_XTINY,
+                            0xFFFFFF, cx, DOCK_EPISODE_Y,
+                            DOCK_EPISODE_MAX_W, _dockEpOffset, true);
 
-        // Episode title (marquee if overflows)
-        drawMarqueeText(dc, epTitle, Graphics.FONT_SMALL,
-                        containerX, y + 31, containerW, screenW,
-                        _npTitleOffset, true);
-
-        // Podcast name (marquee if overflows)
-        drawMarqueeText(dc, podTitle, Graphics.FONT_XTINY,
-                        containerX, y + 50, containerW, screenW,
-                        _npSubOffset, false);
-
-        // Progress bar
-        var barX = x + textPad;
-        var barW = w - textPad * 2;
-        var barY = y + 64;
-        var barH = 3;
-
+        // 10. Draw progress bar (Y=338)
+        var barX = 95;
         dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
-        dc.fillRoundedRectangle(barX, barY, barW, barH, 2);
+        dc.fillRoundedRectangle(barX, DOCK_PROGRESS_Y, PROGRESS_BAR_WIDTH, PROGRESS_BAR_HEIGHT, 2);
 
         if (duration > 0 && playedUpTo > 0) {
             var progress = playedUpTo.toFloat() / duration.toFloat();
             if (progress > 1.0) { progress = 1.0; }
-            var progW = (barW.toFloat() * progress).toNumber();
-            if (progW > 0) {
+            var fillW = (PROGRESS_BAR_WIDTH.toFloat() * progress).toNumber();
+            if (fillW > 0) {
                 dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-                dc.fillRoundedRectangle(barX, barY, progW, barH, 2);
+                dc.fillRoundedRectangle(barX, DOCK_PROGRESS_Y, fillW, PROGRESS_BAR_HEIGHT, 2);
             }
         }
 
-        // Play/Pause button
-        var btnR = 13;
-        _playBtnCx = cx - 45;
-        _playBtnCy = y + 85;
-
-        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(_playBtnCx, _playBtnCy, btnR);
-
-        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
-        if (_isPlaying) {
-            dc.fillRectangle(_playBtnCx - 5, _playBtnCy - 6, 4, 12);
-            dc.fillRectangle(_playBtnCx + 2, _playBtnCy - 6, 4, 12);
-        } else {
-            var pts = [[_playBtnCx - 4, _playBtnCy - 7],
-                       [_playBtnCx - 4, _playBtnCy + 7],
-                       [_playBtnCx + 7, _playBtnCy]];
-            dc.fillPolygon(pts);
-        }
-
-        // Time display
+        // 11. Draw time display (Y=346)
         dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
         var timeStr = DataFormat.formatTime(playedUpTo) + " / " + DataFormat.formatTime(duration);
-        dc.drawText(cx + 18, _playBtnCy, Graphics.FONT_XTINY, timeStr,
-                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+        dc.drawText(cx, DOCK_TIME_Y, Graphics.FONT_XTINY, timeStr,
+                    Graphics.TEXT_JUSTIFY_CENTER);
+
+        // 12. Draw play/pause icon (centered at 195, 378)
+        drawPlayPauseIcon(dc, cx, DOCK_PLAYPAUSE_CY);
     }
 
-    //! Draw text with marquee scrolling if it overflows its container
-    private function drawMarqueeText(dc as Graphics.Dc, text as String,
-                                      font as Graphics.FontDefinition,
-                                      containerX as Number, y as Number,
-                                      containerW as Number, screenW as Number,
-                                      offset as Number, isTitle as Boolean) as Void {
+    //! Draw dock marquee text with clipping for overflow
+    private function drawDockMarqueeText(dc as Graphics.Dc, text as String,
+                                          font as Graphics.FontDefinition,
+                                          color as Number, cx as Number,
+                                          y as Number, maxW as Number,
+                                          offset as Number, isEpisode as Boolean) as Void {
         var fullW = dc.getTextWidthInPixels(text, font);
-        var color = isTitle ? Graphics.COLOR_WHITE : 0x777777;
         dc.setColor(color, Graphics.COLOR_TRANSPARENT);
 
-        if (fullW <= containerW) {
-            dc.drawText(containerX + containerW / 2, y, font, text,
-                        Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
-            if (isTitle) { _npTitleMaxScroll = 0; } else { _npSubMaxScroll = 0; }
+        if (fullW <= maxW) {
+            // Fits — draw centered, no marquee needed
+            dc.drawText(cx, y, font, text, Graphics.TEXT_JUSTIFY_CENTER);
+            if (isEpisode) { _dockEpMaxScroll = 0; } else { _dockPodMaxScroll = 0; }
             return;
         }
 
-        var overflow = fullW - containerW;
-        if (isTitle) { _npTitleMaxScroll = overflow; } else { _npSubMaxScroll = overflow; }
+        // Overflows — set up marquee
+        var overflow = fullW - maxW;
+        if (isEpisode) { _dockEpMaxScroll = overflow; } else { _dockPodMaxScroll = overflow; }
 
+        var containerX = cx - maxW / 2;
         var fontH = dc.getFontHeight(font);
-        dc.setClip(containerX, y - fontH / 2, containerW, fontH);
+        dc.setClip(containerX, y, maxW, fontH);
         dc.drawText(containerX - offset, y, font, text,
-                    Graphics.TEXT_JUSTIFY_LEFT | Graphics.TEXT_JUSTIFY_VCENTER);
-        // Restore viewport clip
-        dc.setClip(0, _viewportTop, screenW, _viewportH);
+                    Graphics.TEXT_JUSTIFY_LEFT);
+        dc.clearClip();
     }
 
-    // --- Scroll Indicator ---
-
-    private function drawScrollIndicator(dc as Graphics.Dc, w as Number) as Void {
-        var trackH = _viewportH - 20;
-        var trackTop = _viewportTop + 10;
-        var trackX = w - 8;
-
-        dc.setColor(0x222222, Graphics.COLOR_TRANSPARENT);
-        dc.fillRoundedRectangle(trackX, trackTop, 4, trackH, 2);
-
-        var thumbH = 20;
-        var thumbRange = trackH - thumbH;
-        var thumbY = trackTop;
-        if (_maxScroll > 0) {
-            thumbY = trackTop + ((_scrollOffset.toFloat() / _maxScroll.toFloat()) * thumbRange).toNumber();
-        }
+    //! Draw play (triangle) or pause (two bars) icon
+    private function drawPlayPauseIcon(dc as Graphics.Dc, cx as Number, cy as Number) as Void {
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        dc.fillRoundedRectangle(trackX, thumbY, 4, thumbH, 2);
+        var sz = 8;
+        if (_isPlaying) {
+            // Pause bars
+            dc.fillRectangle(cx - 7, cy - 8, 5, 16);
+            dc.fillRectangle(cx + 2, cy - 8, 5, 16);
+        } else {
+            // Play triangle
+            dc.fillPolygon([[cx - sz, cy - sz], [cx - sz, cy + sz], [cx + sz, cy]]);
+        }
     }
 
     // --- Icon Drawing Helpers ---
 
     private function drawMusicNote(dc as Graphics.Dc, x as Number, y as Number) as Void {
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(x, y + 4, 5);
+        dc.fillCircle(x, y + 14, 5);
         dc.setPenWidth(2);
-        dc.drawLine(x + 5, y + 4, x + 5, y - 10);
-        dc.drawLine(x + 5, y - 10, x + 10, y - 6);
+        dc.drawLine(x + 5, y + 14, x + 5, y);
+        dc.drawLine(x + 5, y, x + 10, y + 4);
         dc.setPenWidth(1);
     }
 
     private function drawHeadphones(dc as Graphics.Dc, x as Number, y as Number) as Void {
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(2);
-        dc.drawArc(x + 8, y + 2, 10, Graphics.ARC_CLOCKWISE, 190, 350);
-        dc.fillRoundedRectangle(x - 3, y, 6, 12, 2);
-        dc.fillRoundedRectangle(x + 13, y, 6, 12, 2);
+        dc.drawArc(x + 8, y + 12, 10, Graphics.ARC_CLOCKWISE, 190, 350);
+        dc.fillRoundedRectangle(x - 3, y + 10, 6, 12, 2);
+        dc.fillRoundedRectangle(x + 13, y + 10, 6, 12, 2);
         dc.setPenWidth(1);
     }
 
-    //! Draw a simple gear/cog icon for settings
-    private function drawGearIcon(dc as Graphics.Dc, x as Number, y as Number) as Void {
+    //! Download arrow icon — arrow pointing down into a tray
+    private function drawDownloadIcon(dc as Graphics.Dc, x as Number, y as Number) as Void {
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(x + 8, y, 7);
-        dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(x + 8, y, 3);
-        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        // Gear teeth (4 small rectangles at cardinal directions)
-        dc.fillRectangle(x + 6, y - 10, 4, 5);
-        dc.fillRectangle(x + 6, y + 5, 4, 5);
-        dc.fillRectangle(x - 2, y - 2, 5, 4);
-        dc.fillRectangle(x + 13, y - 2, 5, 4);
+        // Down arrow shaft
+        dc.setPenWidth(2);
+        dc.drawLine(x + 8, y, x + 8, y + 14);
+        dc.setPenWidth(1);
+        // Arrowhead
+        dc.fillPolygon([[x + 2, y + 10], [x + 14, y + 10], [x + 8, y + 18]]);
+        // Tray (U shape)
+        dc.setPenWidth(2);
+        dc.drawLine(x, y + 18, x, y + 24);
+        dc.drawLine(x, y + 24, x + 16, y + 24);
+        dc.drawLine(x + 16, y + 24, x + 16, y + 18);
+        dc.setPenWidth(1);
     }
 
-    // --- Settings Pill ---
+    //! Draw a gear/cog icon per Section 5.5.6
+    private function drawGearIcon(dc as Graphics.Dc, x as Number, y as Number) as Void {
+        var iconCx = x + 11;
+        var iconCy = y + 11;
+        var outerR = 11;
+        var innerR = 5;
+        var toothW = 4;
+        var toothH = 4;
 
-    private function drawSettingsPill(dc as Graphics.Dc, x as Number, y as Number,
-                                      w as Number, h as Number, r as Number,
-                                      cx as Number) as Void {
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(iconCx, iconCy, outerR);
+
         dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
-        dc.fillRoundedRectangle(x, y, w, h, r);
+        dc.fillCircle(iconCx, iconCy, innerR);
 
-        var iconX = x + 20;
-        var iconY = y + h / 2;
-        drawGearIcon(dc, iconX, iconY);
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        for (var i = 0; i < 6; i++) {
+            var angle = i * 60.0 * Math.PI / 180.0;
+            var tx = iconCx + (outerR * Math.cos(angle)).toNumber() - toothW / 2;
+            var ty = iconCy - (outerR * Math.sin(angle)).toNumber() - toothH / 2;
+            dc.fillRectangle(tx, ty, toothW, toothH);
+        }
+    }
 
-        var textX = cx + 8;
-        dc.setColor(0xBBBBBB, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(textX, y + h / 2, Graphics.FONT_SMALL, "Settings",
-                    Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
+    //! Draw scroll indicators when content extends beyond viewport
+    private function drawScrollIndicators(dc as Graphics.Dc, cx as Number) as Void {
+        dc.setColor(0x666666, Graphics.COLOR_TRANSPARENT);
+
+        // Up arrow when scrolled down
+        if (_scrollOffset > 0) {
+            dc.fillPolygon([[cx - 8, 18], [cx + 8, 18], [cx, 6]]);
+        }
+
+        // Down arrow when more content below
+        if (_scrollOffset < _maxScroll) {
+            var arrowY = DOCK_TOP - 10;
+            dc.fillPolygon([[cx - 8, arrowY - 8], [cx + 8, arrowY - 8], [cx, arrowY + 4]]);
+        }
     }
 
     // --- Public API ---
@@ -430,68 +481,34 @@ class HomeMenuView extends WatchUi.View {
         WatchUi.requestUpdate();
     }
 
-    //! Scroll the viewport down (content moves up)
     function scrollDown() as Void {
-        _scrollOffset = _scrollOffset + _scrollStep;
+        _scrollOffset = _scrollOffset + SCROLL_STEP;
         if (_scrollOffset > _maxScroll) { _scrollOffset = _maxScroll; }
         WatchUi.requestUpdate();
     }
 
-    //! Scroll the viewport up (content moves down)
     function scrollUp() as Void {
-        _scrollOffset = _scrollOffset - _scrollStep;
+        _scrollOffset = _scrollOffset - SCROLL_STEP;
         if (_scrollOffset < 0) { _scrollOffset = 0; }
         WatchUi.requestUpdate();
-    }
-
-    //! Hit-test a tap. Returns: 0=queue, 1=podcasts, 2=NP, 3=playBtn, 4=settings, -1=miss
-    function hitTest(tapX as Number, tapY as Number) as Number {
-        var w = System.getDeviceSettings().screenWidth;
-
-        if (tapY < _viewportTop || tapY > _viewportTop + _viewportH) {
-            return -1;
-        }
-        if (tapX < 20 || tapX > w - 20) {
-            return -1;
-        }
-
-        if (tapY >= _queueScreenY && tapY < _queueScreenY + _pillH) {
-            return 0;
-        }
-        if (tapY >= _podScreenY && tapY < _podScreenY + _pillH) {
-            return 1;
-        }
-        if (tapY >= _npScreenY && tapY < _npScreenY + _npH) {
-            var dx = tapX - _playBtnCx;
-            var dy = tapY - _playBtnCy;
-            if (dx * dx + dy * dy <= 20 * 20) {
-                return 3;
-            }
-            return 2;
-        }
-        if (tapY >= _settingsScreenY && tapY < _settingsScreenY + _settingsH) {
-            return 4;
-        }
-
-        return -1;
     }
 
     function getService() as IPodcastService {
         return _service;
     }
+
+    function getScrollOffset() as Number {
+        return _scrollOffset;
+    }
 }
 
-//! Delegate for the home menu. Tap to navigate, swipe/buttons to scroll.
-//! Uses InputDelegate (NOT BehaviorDelegate) because BehaviorDelegate's
-//! behavior translator converts ALL screen taps into onSelect() calls,
-//! which prevents onTap() from ever receiving touch coordinates.
-//! With InputDelegate, onTap() fires directly for touch events.
+//! Delegate for the split-dock home menu.
+//! Uses InputDelegate (NOT BehaviorDelegate) — BehaviorDelegate converts
+//! all taps to onSelect(), preventing coordinate-based hit testing.
 class HomeMenuDelegate extends WatchUi.InputDelegate {
 
     private var _view as HomeMenuView;
     private var _service as IPodcastService;
-    // Tracks which item the physical button SELECT activates.
-    // Cycles via KEY_UP/KEY_DOWN. 0=Queue, 1=Podcasts, 2=NowPlaying, 3=Settings.
     private var _selectedIndex as Number = 0;
 
     function initialize(view as HomeMenuView, service as IPodcastService) {
@@ -500,27 +517,47 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
         _service = service;
     }
 
-    //! Touch: map tap coordinates to the menu item under the finger
+    //! Touch zones per Section 5.4.9:
+    //! Y >= 365: toggle play/pause
+    //! Y >= 260 and Y < 365: navigate to full Now Playing screen
+    //! Y < 260: hit test against pills
     function onTap(evt as WatchUi.ClickEvent) as Boolean {
         var coords = evt.getCoordinates();
         var tapX = coords[0] as Number;
         var tapY = coords[1] as Number;
 
-        var hit = _view.hitTest(tapX, tapY);
-
-        if (hit == 0) {
-            navigateToQueue();
-            return true;
-        } else if (hit == 1) {
-            navigateToPodcasts();
-            return true;
-        } else if (hit == 2) {
-            navigateToNowPlaying();
-            return true;
-        } else if (hit == 3) {
+        // Bottom dead zone: play/pause toggle
+        if (tapY >= 365) {
             _view.togglePlayPause();
             return true;
-        } else if (hit == 4) {
+        }
+
+        // Dock info zone: navigate to Now Playing
+        if (tapY >= 260) {
+            navigateToNowPlaying();
+            return true;
+        }
+
+        // Scrollable zone: hit test against pill Y positions
+        var scrollOffset = getScrollOffset();
+        var queueDrawY = 80 - scrollOffset;
+        var podDrawY = 176 - scrollOffset;
+        var dlDrawY = 272 - scrollOffset;
+        var settDrawY = 368 - scrollOffset;
+
+        if (tapY >= queueDrawY && tapY < queueDrawY + 80) {
+            navigateToQueue();
+            return true;
+        }
+        if (tapY >= podDrawY && tapY < podDrawY + 80) {
+            navigateToPodcasts();
+            return true;
+        }
+        if (tapY >= dlDrawY && tapY < dlDrawY + 80) {
+            navigateToDownloads();
+            return true;
+        }
+        if (tapY >= settDrawY && tapY < settDrawY + 80) {
             navigateToSettings();
             return true;
         }
@@ -528,7 +565,7 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
         return false;
     }
 
-    //! Swipe gestures for scrolling the viewport
+    //! Swipe gestures for scrolling the menu zone
     function onSwipe(evt as WatchUi.SwipeEvent) as Boolean {
         var dir = evt.getDirection();
         if (dir == WatchUi.SWIPE_UP) {
@@ -545,13 +582,11 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
     function onKey(evt as WatchUi.KeyEvent) as Boolean {
         var key = evt.getKey();
 
-        // SELECT / ACTION button — navigate to the tracked item
         if (key == WatchUi.KEY_ENTER || key == WatchUi.KEY_START) {
             navigateByIndex(_selectedIndex);
             return true;
         }
 
-        // DOWN — cycle selected index forward
         if (key == WatchUi.KEY_DOWN) {
             _selectedIndex = _selectedIndex + 1;
             if (_selectedIndex > 3) { _selectedIndex = 0; }
@@ -559,7 +594,6 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
             return true;
         }
 
-        // UP — cycle selected index backward
         if (key == WatchUi.KEY_UP) {
             _selectedIndex = _selectedIndex - 1;
             if (_selectedIndex < 0) { _selectedIndex = 3; }
@@ -567,7 +601,6 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
             return true;
         }
 
-        // BACK button
         if (key == WatchUi.KEY_ESC) {
             WatchUi.popView(WatchUi.SLIDE_DOWN);
             return true;
@@ -576,13 +609,17 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
         return false;
     }
 
+    private function getScrollOffset() as Number {
+        return _view.getScrollOffset();
+    }
+
     private function navigateByIndex(index as Number) as Void {
         if (index == 0) {
             navigateToQueue();
         } else if (index == 1) {
             navigateToPodcasts();
         } else if (index == 2) {
-            navigateToNowPlaying();
+            navigateToDownloads();
         } else {
             navigateToSettings();
         }
@@ -606,6 +643,11 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
             npDelegate.setView(npView);
             WatchUi.pushView(npView, npDelegate, WatchUi.SLIDE_UP);
         }
+    }
+
+    private function navigateToDownloads() as Void {
+        var dlView = new DownloadsView();
+        WatchUi.pushView(dlView, new DownloadsDelegate(dlView), WatchUi.SLIDE_UP);
     }
 
     private function navigateToSettings() as Void {
