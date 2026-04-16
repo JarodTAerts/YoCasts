@@ -595,3 +595,621 @@ Mal's `docs/offline-sync-design.md` defines a 4-phase offline strategy. Phase 1 
 
 - Exact `Application.Storage` size limit on Venu 4 41mm — needs hardware testing.
 - Whether `clearValues()` needs to become selective once changelog/auth keys are added.
+
+---
+
+## Architecture Assessment: Podcast Art + Audio Playback Roadmap (2026-04-16)
+
+**By:** Mal (Lead)  
+**Date:** 2026-04-16  
+**Requested by:** Jarod Aerts  
+**Status:** Assessment — pending team review  
+**Affects:** Kaylee (Garmin Dev), Wash (API Dev), Zoe (Tests)
+
+### Item 1: Podcast Art Colors + Thumbnails
+
+#### Feasibility Verdict: **FEASIBLE — but defer to Phase E (polish)**
+
+#### CIQ Image Capabilities
+
+CIQ provides `Communications.makeImageRequest()` — a first-class API for downloading images over the network. It returns a `BitmapResource` in the callback.
+
+**Key options:**
+- `:maxWidth` / `:maxHeight` — resize on-transit
+- `:packingFormat` — supports JPG, PNG, YUV (since API 4.2.0, Venu 4 qualifies)
+- `:dithering` — Floyd-Steinberg for palette-limited rendering
+- `:palette` — constrain to specific color palette
+
+#### Recommended Thumbnail Size
+
+- **40×40px** is the sweet spot for 390×390 watch screen
+- Uncompressed: 40 × 40 × 2 bytes = **3,200 bytes per image**
+- With JPG packing: ~1-2 KB per image over-the-wire
+- **Do NOT exceed 48×48px**
+
+#### Color Tinting Works
+
+In custom `HomeMenuView` and custom list views, setting per-item backgrounds via `Dc.setColor()` and `Dc.fillRoundedRectangle()` is trivial. Menu2-based views (Queue, Episodes) are harder — would need custom `MenuItem` subclasses.
+
+**Recommendation:** Color tinting on home screen pills and Podcasts list only. NOT on Menu2 lists.
+
+#### Memory Impact Analysis
+
+Storing 15 thumbnails + 15 color values simultaneously:
+
+| Item | Per-podcast | × 15 podcasts |
+|---|---|---|
+| Thumbnail (40×40, 16-bit) | 3,200 B | **48,000 B** (~47 KB) |
+| Color value (Number) | 4 B | 60 B |
+| BitmapResource overhead | ~100 B | 1,500 B |
+| **Total** | ~3,304 B | **~49,560 B** (~48 KB) |
+
+**48 KB is 6.3% of 768 KB budget.** Manageable IF lazy-loaded.
+
+**Critical constraint:** Load thumbnails for visible items only (3-5 on screen). Evict off-screen to drop peak memory to ~16 KB — acceptable.
+
+#### Where to Extract Colors: **Proxy (server-side)**
+
+On-device color extraction is not viable (no pixel API). Proxy should:
+1. Fetch podcast's art URL from PocketCasts API
+2. Download image server-side
+3. Extract dominant color (k-means or simple average)
+4. Return hex color in podcast metadata JSON (e.g., `"artColor": "#2A4B8D"`)
+5. Optionally: serve resized thumbnail via separate endpoint
+
+#### What We'd Need
+
+| Component | Owner | Effort |
+|---|---|---|
+| Proxy: `GET /art/{podcastUuid}` endpoint | Wash | 1 day |
+| Proxy: Add `artColor` to `/user/podcast/list` | Wash | 0.5 day |
+| Garmin: ArtworkManager module — lazy-load | Kaylee | 2 days |
+| Garmin: Update custom list views | Kaylee | 1 day |
+| Tests: Proxy art endpoint | Zoe | 0.5 day |
+| **Total** | | **~5 days** |
+
+#### Recommendation
+
+**Defer to Phase E.** Rationale:
+1. Audio download is the core feature — art is polish
+2. 48 KB RAM may be needed for sync engine and download queue
+3. No hard dependency — app works perfectly with text-only lists
+4. Color extraction adds network dependency (failure mode)
+5. When built: colors first → thumbnails second → per-item tinting last
+
+### Item 2: Audio Download & Playback Roadmap
+
+#### Current State
+
+| Component | Status |
+|---|---|
+| App type: AudioContentProviderApp | ✅ Migrated, builds clean |
+| Dual-build (sim vs device) | ✅ Configured |
+| Media stubs | ✅ In source/media/ |
+| CacheManager + CachedPodcastService | ✅ Phase 1 complete |
+| Real Venu 4 hardware | ❌ Not available yet |
+| Simulator audio testing | ❌ CIQ limitation |
+
+#### What We Can Build NOW (Simulator-Testable)
+
+**Phases A and B** are pure data-layer and HTTP — no Media module, fully simulator-testable.
+
+##### Phase A: Changelog & Position Tracking (2-3 days)
+
+All six tasks simulator-safe:
+
+| Task | Description | Testable in Sim? |
+|---|---|---|
+| A1: Changelog in CacheManager | Coalesced mutation log, selective `clearCache()` | ✅ Yes |
+| A2: Positions Map | Consolidated positions, eviction, dirty tracking | ✅ Yes |
+| A3: PositionTracker module | Timer-based position saves, battery-aware frequency | ✅ Yes |
+| A4: ConnectivityManager | Three-state polling, transition callbacks | ✅ Partial |
+| A5: CachedPodcastService update | Fix `_isConnected()` bug | ✅ Yes |
+| A6: Auth token persistence | Save/load/refresh tokens in Storage | ✅ Yes |
+
+##### Phase B: Sync Engine (4-5 days)
+
+Entirely HTTP + Storage. No Media module.
+
+| Task | Description | Testable in Sim? |
+|---|---|---|
+| B1: SyncEngine state machine | 7-step sync: auth → push → pull → reconcile → clean | ✅ Yes |
+| B2: Push pipeline | Batch changelog entries to `/sync/update_episode` | ✅ Yes |
+| B3: Pull pipeline | Fetch `/user/in_progress`, queue, episodes | ✅ Yes |
+| B4: Reconciliation logic | "Furthest position wins", status hierarchy | ✅ Yes |
+| B5: Auto-sync trigger | ConnectivityManager listener → triggerSync() | ✅ Yes |
+
+#### What MUST Wait for Real Hardware
+
+| Component | Why It Needs Hardware | Phase |
+|---|---|---|
+| SyncDelegate downloads | `HTTP_RESPONSE_CONTENT_TYPE_AUDIO` + Media cache | Phase C |
+| ContentIterator | Needs `Media.getCachedContentObj()` | Phase D |
+| ContentDelegate callbacks | Fired by native media player only | Phase D |
+| Bluetooth audio output | Hardware-only | Phase D |
+| Media.getCacheStatistics() | Real values only on device | Phase C |
+| Wi-Fi direct detection (reliable) | Sim doesn't model `phoneConnected` vs `connectionAvailable` | Phase A (partial) |
+
+#### Prioritized Work Breakdown
+
+**Priority: Phase A → Phase B → Download Queue UI → Phase C (hardware)**
+
+Sprint 1 Foundation (Week 1): 11 tasks (6 days)
+Sprint 2 Sync Engine (Week 2): 8 tasks (5 days)
+Sprint 3 Download Queue UI (Week 3): 7 tasks (5 days)
+
+Total: ~3 weeks, all simulator-testable except Phase C/D components.
+
+#### Key Risks
+
+1. **`makeWebRequest()` with `HTTP_RESPONSE_CONTENT_TYPE_AUDIO` unverified on Venu 4** — same mechanism Spotify/Deezer use. Mitigated by sample verification.
+
+2. **PocketCasts audio URLs may require auth or redirect** — validate during Sprint 1. If auth needed, proxy must be authenticated intermediary.
+
+3. **64 KB background memory for SyncDelegate** — ~15 KB usable after Garmin overhead. Keep delegate lean.
+
+4. **No download resume in v1** — full re-download on failure. Acceptable for 20-50 MB episodes on Wi-Fi.
+
+#### Recommendation
+
+**Start Sprints 1-3 immediately.** Everything is simulator-testable. By the time Venu 4 arrives, we'll have complete data layer and download code written — waiting for hardware validation only.
+
+**Highest-risk unknown:** Task 7 (audio URL resolution). Wash prioritize this — if PocketCasts audio requires special auth, we need to know early.
+
+### Summary of Calls
+
+| Decision | Verdict |
+|---|---|
+| Podcast art colors + thumbnails | **Feasible. Defer to Phase E.** Colors first, thumbnails second. Server-side extraction. |
+| Audio download — what to build now | **Phases A + B + download queue UI.** All simulator-testable. ~3 weeks. |
+| Audio download — what waits | **Phases C + D.** Needs Venu 4 hardware. |
+| Highest priority task | **A1 (changelog), audio URL resolution for Wash, tests for Zoe.** |
+| Highest risk | **PocketCasts audio URL auth — Wash validates first.** |
+
+---
+
+## Podcast Art Color & Thumbnail Feasibility — Artwork is GO (2026-04-16)
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-04-16  
+**Affects:** Mal (Lead), Wash (API Dev), Jarod Aerts
+
+### Summary
+
+Completed full API research on CIQ image loading and custom colors. **Both are feasible on Venu 4 41mm.**
+
+### Key Findings
+
+1. **`makeImageRequest()`** loads PNG/JPG from URLs at runtime. 30×30px JPG = 1-3 KB per image, well under 32 KB response limit.
+
+2. **768 KB memory** on Venu 4 means 15 thumbnails at 30×30px = ~27 KB (16-bit), trivially within budget. The "no artwork in v1" decision was based on 128 KB devices — no longer applicable for Venu 4-only build.
+
+3. **Custom hex colors** like `0xFF5500` work directly in `dc.setColor()`. `Graphics.createColor(alpha, r, g, b)` enables semi-transparent overlays.
+
+4. **`CustomMenuItem`** (API 3.2.0+) or custom View can render per-item brand-color backgrounds and thumbnails.
+
+### Recommendation
+
+**Option A — brand colors first.** Highest visual impact for zero cost. Defer thumbnails to Phase E.
+
+### Impact on Proxy
+
+Wash: proxy already whitelists `artwork_url` and `author_color`. If `author_color` comes as hex string, consider pre-parsing to integer for watch efficiency.
+
+---
+
+## Design: Podcast Art Color & Thumbnail Support (2026-04-16)
+
+**By:** Wash (API Dev)  
+**Date:** 2026-04-16  
+**Affects:** Kaylee (Garmin Dev), Mal (Lead), Jarod Aerts  
+**Status:** Proposal — needs team review
+
+### Executive Summary
+
+PocketCasts already provides pre-computed color metadata and server-side resized artwork. **No image processing library is needed.** The proxy enriches the podcast list with colors by fetching a lightweight JSON endpoint. Thumbnails load natively via CIQ's `makeImageRequest()`.
+
+### Research Findings
+
+#### 1. PocketCasts Art URLs — Confirmed
+
+Artwork served from `static.pocketcasts.com` as WebP only:
+
+| URL Pattern | Status | Size |
+|---|---|---|
+| `/discover/images/webp/200/{uuid}.webp` | ✅ Working | ~3.1 KB |
+| `/discover/images/webp/480/{uuid}.webp` | ✅ Working | ~7.1 KB |
+| `/discover/images/webp/960/{uuid}.webp` | ✅ Working | ~14.7 KB |
+
+No authentication required. Cache: `max-age=604800` (7 days), ETag supported.
+
+#### 2. PocketCasts Color Metadata — The Goldmine
+
+PocketCasts pre-computes dominant colors for every podcast:
+
+```
+GET https://static.pocketcasts.com/discover/images/metadata/{uuid}.json
+```
+
+Returns (231 bytes, no auth, 7-day cache):
+
+```json
+{
+  "colors": {
+    "background": "#1d2b38",
+    "tintForDarkBg": "#eaefa9",
+    "tintForLightBg": "#257bbb",
+    "fabForLightBg": "#61c6c7",
+    "fabForDarkBg": "#61c6c7",
+    "linkForLightBg": "#61c6c7",
+    "linkForDarkBg": "#61c6c7"
+  }
+}
+```
+
+Eliminates need for SkiaSharp, ImageSharp, or custom color extraction. **Tested with multiple UUIDs — all return valid colors.**
+
+#### 3. Image Processing Libraries — NOT NEEDED
+
+| Library | Azure Fit | Cold Start | Notes |
+|---|---|---|---|
+| **SkiaSharp** | ⚠️ Needs native libs | +200-500ms | ~25 MB, unsupported on Linux consumption |
+| **ImageSharp** | ✅ Pure .NET | +50-100ms | ~5 MB, best choice if needed |
+| **System.Drawing** | ❌ Not supported | N/A | GDI+ unsupported on Azure |
+
+#### 4. Size Budget Analysis
+
+| Approach | Per-podcast | 15 podcasts | Under 32 KB? |
+|---|---|---|---|
+| Color hex only (`artColor`) | ~7 bytes | ~105 bytes | ✅ Trivial |
+| Color + artUrl | ~75 bytes | ~1.1 KB | ✅ Easy |
+| Base64 40×40 JPEG | ~1,500 bytes | **~22.5 KB** | ⚠️ Tight |
+
+Current stripped list: ~3-5 KB for 15. Colors add negligible overhead.
+
+#### 5. CIQ `makeImageRequest()` — Native Solution
+
+```monkey-c
+Communications.makeImageRequest(
+    "https://static.pocketcasts.com/discover/images/webp/200/" + uuid + ".webp",
+    {},
+    { :maxWidth => 48, :maxHeight => 48 },
+    method(:onArtReceived)
+);
+```
+
+**Key properties:**
+- Native image decoding (PNG, JPEG, BMP, WebP varies)
+- Automatic resizing via `:maxWidth`/`:maxHeight`
+- Returns `BitmapResource` directly usable in views
+- Async callback — fits CIQ's event model
+- Memory: 48×48 ARGB = ~9.2 KB per image
+
+### Recommended Design: Option C (Initial) → Option A (Phase E)
+
+#### Immediate (Phase E prep)
+
+**Proxy changes:**
+1. When handling `/user/podcast/list`, fetch color metadata for each podcast UUID
+2. Add `artColor` (background hex) and `artTint` to each podcast
+3. In-memory cache with 7-day TTL, matching PocketCasts cache headers
+
+**CIQ changes:**
+1. Read `artColor` from podcast data — use as background tint
+2. Prepare for `artUrl` loading later
+
+#### Proxy Implementation Sketch
+
+```csharp
+private static readonly ConcurrentDictionary<string, ArtMetadata> _artCache = new();
+
+private async Task<string> EnrichPodcastList(string json)
+{
+    var doc = JsonNode.Parse(json);
+    if (doc is not JsonObject root) return json;
+    
+    var podcasts = root["podcasts"]?.AsArray();
+    if (podcasts == null) return json;
+    
+    var colorTasks = new List<Task>();
+    foreach (var podcast in podcasts)
+    {
+        if (podcast is not JsonObject podObj) continue;
+        var uuid = podObj["uuid"]?.GetValue<string>();
+        if (uuid == null) continue;
+        
+        colorTasks.Add(Task.Run(async () =>
+        {
+            var colors = await GetArtColors(uuid);
+            if (colors != null)
+            {
+                podObj["artColor"] = colors.Background;
+                podObj["artTint"] = colors.Tint;
+            }
+        }));
+    }
+    
+    await Task.WhenAll(colorTasks);
+    return root.ToJsonString();
+}
+```
+
+#### Caching Strategy (v1)
+
+**In-Memory Cache:**
+- **Pros:** Zero latency after cold start, zero cost
+- **Cons:** Lost on cold start, first request pays ~100-150ms for 15 parallel fetches
+- **Mitigation:** PocketCasts metadata endpoint is fast (~50ms), parallelized
+- **Cold start impact:** ~100-150ms on initial `/user/podcast/list` call
+
+### Impact Assessment
+
+| Concern | Impact |
+|---|---|
+| Response size | +1.8 KB for 15 podcasts. Still ~5-7 KB total, under 32 KB |
+| Proxy latency | +100-150ms on cold start. ~0ms on warm requests |
+| Cold start time | No new NuGet packages. No change. |
+| CIQ memory | 48×48 bitmap = ~9.2 KB. 15 loaded = ~138 KB. Within budget. |
+| Azure cost | $0.00 — metadata from PocketCasts CDN |
+
+### Open Questions for Team
+
+1. **Kaylee:** Does `makeImageRequest()` support WebP on Venu 4 41mm SDK 9.1.0? If not, need proxy-side PNG conversion (Option B).
+2. **Kaylee:** Target thumbnail size for Menu2 items? UX spec mentions 48×48 — confirm?
+3. **Mal:** Option C now (colors only) or jump to Option A (colors + URLs)? Option C aligns with "no artwork in v1."
+4. **All:** Include `tintForDarkBg` for text accent colors?
+
+### Recommendation
+
+**Implement Option C now (colors only), prepare for Option A later.**
+
+1. Add `artColor` and `artTint` to proxy response — ~15 lines of code
+2. Zero new dependencies, zero cold start impact
+3. CIQ uses colors for tinted UI immediately
+4. Phase E: add `artUrl` and `makeImageRequest()` handling
+5. If WebP unsupported: add conversion endpoint (Option B) at that time
+
+**Key insight: PocketCasts already did the hard work.** We forward their metadata, no image processing needed.
+
+---
+
+## Download Data Layer — Storage-Backed Queue + Proxy Audio Info (2026-04-16)
+
+**By:** Wash (API Dev)  
+**Date:** 2026-04-16  
+**Affects:** Kaylee (Garmin Dev), Mal (Lead)
+
+### What Was Built
+
+Three components forming the data layer for episode audio downloads (Phase B/C):
+
+#### 1. DownloadQueue Module (Garmin)
+
+**File:** `YoCastsGarmin/source/services/DownloadQueue.mc`
+
+Replaced mock stub with real Application.Storage persistence. Queue survives app restarts.
+
+**Design:**
+- Storage key: `yc_dl_queue` — array of download item dictionaries
+- Max queue size: 20 episodes
+- Status flow: PENDING → DOWNLOADING → DOWNLOADED or FAILED
+- Retry policy: Failed items retry up to 3 times, then ignored by `getNextPending()`
+- Backward compatible: All existing constants (DL_UUID, DL_STATUS, etc.) and methods preserved
+
+#### 2. StorageManager Module (Garmin)
+
+**File:** `YoCastsGarmin/source/services/StorageManager.mc`
+
+Tracks downloaded episode metadata separately from Media module.
+
+**Design:**
+- Storage key: `yc_downloads` — dictionary mapping episodeUuid → metadata
+- No Media imports — works in simulator (source/media/ excluded)
+- `refId` field: Will hold Media.ContentRef on hardware, string placeholder now
+- `getTotalDownloadSize()`: Enforce storage budget
+
+#### 3. AudioInfo Proxy Endpoint (Azure)
+
+**File:** `YoCastsProxy/AudioInfoProxy.cs`
+
+New endpoint: `GET /api/pocketcasts/episode/{uuid}/audio-info`
+
+**Features:**
+- Fetches episode metadata from PocketCasts (audio URL, duration, title)
+- Issues HEAD request to CDN for real file size (API `size` field unreliable)
+- Returns final URL after redirect chain resolution
+- 15-second timeout on HEAD requests
+- Watch uses this to check storage before downloading
+
+### Decisions Made
+
+1. **DownloadQueue owns UI contract** — DL_* constants and methods preserved for DownloadsView compatibility
+2. **StorageManager separate from DownloadQueue** — queue tracks intent (what to download), storage tracks outcome (what's downloaded)
+3. **No Media module references** — both modules compile in simulator build
+4. **HEAD-based size resolution in proxy** — Garmin's `makeWebRequest()` doesn't support HEAD. Proxy does HEAD and returns size in JSON
+
+### Build Status
+
+✅ Garmin simulator build passes  
+✅ All existing tests pass  
+⚠️ Proxy deployment pending (`func azure functionapp publish`)
+
+### What's Next
+
+- **Phase C4 (Kaylee):** Wire `YoCastsSyncDelegate` to use `DownloadQueue.getNextPending()` and `StorageManager.markDownloaded()`
+- **Phase D:** ContentIterator reads from StorageManager to enumerate downloaded episodes
+- **Proxy deployment:** AudioInfoProxy needs publish to go live
+
+---
+
+## Download UI Architecture & DownloadQueue Interface Contract (2026-04-16)
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-04-16  
+**Affects:** Wash (API Dev), Mal (Lead)
+
+### Summary
+
+Implemented download management UI screens with DownloadQueue module. Interface contract defined and ready for Wash's real implementation.
+
+### Decisions Made
+
+#### 1. DownloadQueue Module Interface
+
+Module-level singleton pattern with in-memory state. Real implementation persists to `Application.Storage`.
+
+**Module functions:**
+- `addToQueue(episodeDict)` — append to queue
+- `removeFromQueue(uuid)` — remove by UUID
+- `getStatus(uuid)` — query current state
+- `getProgress(uuid)` — get percent complete
+- `getDownloads()` — return all download items
+- `getDownloadCount()` — count pending+downloading
+- `getNextPending()` — get next queued episode for SyncDelegate
+- `markDownloading(uuid)` — update status
+- `markDownloaded(uuid, refId)` — mark complete with Media ref
+- `toEpisodeDict()` — convert for NowPlayingView compatibility
+
+#### 2. Download Status Constants
+
+Four states: `STATUS_PENDING (0)`, `STATUS_DOWNLOADING (1)`, `STATUS_DOWNLOADED (2)`, `STATUS_FAILED (3)`
+
+#### 3. Episode Action Menu Pattern
+
+EpisodeListView shows Menu2 action popup on episode select:
+- Play (existing — navigates to NowPlayingView)
+- Download (new — calls `DownloadQueue.addToQueue()`)
+
+Extensible for future actions (Star, Mark Played, etc.).
+
+#### 4. Downloads Pill Placement
+
+Added between Podcasts and Settings in HomeMenuView:
+- Queue → Podcasts → Downloads → Settings
+- TOTAL_MENU_HEIGHT: 382 → 478px
+- Touch zone: Y < 260 for scrollable area
+
+#### 5. Download Item Dictionary Keys
+
+Separate from DataKeys.E_* to avoid coupling:
+- `DL_UUID`, `DL_TITLE`, `DL_PODCAST_TITLE`, `DL_STATUS`, `DL_PROGRESS`, `DL_SIZE`, `DL_STATUS_TEXT`
+
+`toEpisodeDict()` converts for NowPlayingView compatibility.
+
+### Open Questions Resolved
+
+- **Failed downloads auto-retry:** Yes, up to 3 times per Wash's implementation
+- **Maximum downloads:** Capped at 20 episodes or storage budget
+- **Sort order:** By status (downloading first) then by add order
+
+### Build Status
+
+✅ Simulator build passes  
+✅ Device build passes (Venu 4 41mm)  
+✅ Strict linting enabled (`-l 3`)  
+
+### What's Next
+
+- **Wash (DownloadQueue real impl):** Persist to `Application.Storage`, implement queue state machine
+- **Kaylee (Phase C):** Wire SyncDelegate to use `DownloadQueue.getNextPending()` for actual downloads
+
+---
+
+## YoCastsProxy: Art Colors + Audio Info Deployed to Azure (2026-04-16)
+
+**By:** Wash (API Dev)  
+**Date:** 2026-04-16  
+**Status:** DEPLOYED
+
+### Summary
+
+Extended YoCastsProxy to enrich podcast metadata with brand colors, tints, and artwork URLs. Also added audio metadata endpoint for download planning.
+
+### Deployed URL
+
+```
+https://yocasts-proxy.azurewebsites.net/api/pocketcasts/{*path}
+```
+
+### Changes Made
+
+#### 1. Podcast List Enrichment
+
+**Endpoint:** `GET /api/pocketcasts/user/podcast/list`
+
+**Added fields per podcast:**
+- `artColor` — background hex (e.g., `#1d2b38`)
+- `artTint` — tint for dark backgrounds (e.g., `#eaefa9`)
+- `artUrl` — 200px WebP image URL (not yet loaded by watch, prepared for Phase E)
+
+**Implementation:**
+- Parallel fetch of color metadata for each podcast UUID
+- Source: `https://static.pocketcasts.com/discover/images/metadata/{uuid}.json`
+- In-memory cache with 7-day TTL (matching PocketCasts headers)
+- `ConcurrentDictionary<string, ArtMetadata>` storage
+
+#### 2. Audio Info Endpoint
+
+**Endpoint:** `GET /api/pocketcasts/episode/{uuid}/audio-info`
+
+**Returns:**
+```json
+{
+  "audioUrl": "https://...",
+  "duration": 3600,
+  "fileSize": 52428800,
+  "title": "Episode Title"
+}
+```
+
+**Features:**
+- Fetches episode metadata from PocketCasts
+- Issues HEAD request to CDN for real file size (API field unreliable)
+- Follows redirect chain to final CDN URL
+- 15-second timeout on slow CDNs
+- Watch uses this before downloading to verify storage availability
+
+### Implementation Details
+
+**File:** `YoCastsProxy/PocketCastsProxy.cs`
+
+- **Color fetch strategy:** Parallel Task.WhenAll() for 15 UUIDs
+- **Fallback:** If color fetch fails, podcast returned unchanged (graceful degradation)
+- **Response size:** +1.8 KB for 15 podcasts (still ~5-7 KB total, under 32 KB limit)
+- **Dependencies:** Zero new NuGet packages — uses existing System.Text.Json
+- **Latency:** ~100-150ms cold start, ~0ms warm cache
+- **Cost:** Free — metadata fetched from PocketCasts CDN
+
+### Deployment Verification
+
+✅ HTTP 401 on unauthenticated `/user/podcast/list` (correct — Bearer token required)  
+✅ Color metadata fetches successfully for all podcasts  
+✅ Response size within budget  
+✅ Endpoint available at: `https://yocasts-proxy.azurewebsites.net/api/pocketcasts/user/podcast/list`
+
+### Caching Strategy (v1 — In-Memory)
+
+**Pros:**
+- Zero latency after cold start
+- Zero cost
+- Simple implementation
+
+**Cons:**
+- Lost on cold start
+- First request pays ~100-150ms for parallel metadata fetches
+
+**Mitigation:** PocketCasts metadata endpoint is fast (~50ms per request). Total cold start impact: ~100-150ms on initial podcast list fetch.
+
+**Future (v2):** If cold start latency becomes a problem, migrate to Azure Table Storage persistence (eliminates cold start penalty, costs ~$0.001/month).
+
+### Action Items for Team
+
+- **Kaylee:** Update Garmin app to read `artColor`/`artTint` from proxy and use for UI tinting
+- **Kaylee:** Prepare for `artUrl` loading via `makeImageRequest()` in Phase E
+- **Mal:** Verify CachedPodcastService routes through proxy URL
+- **Zoe:** Add tests for color metadata endpoint
+
+### Open Questions
+
+1. **Kaylee:** Does `makeImageRequest()` support WebP on Venu 4 SDK 9.1.0? If not, proxy may need PNG conversion endpoint.
+2. **Team:** Should we implement in-memory OR Table Storage caching for v1? Current choice: in-memory (simpler, cold start trade-off acceptable).
