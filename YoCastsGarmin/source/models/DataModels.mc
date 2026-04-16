@@ -29,6 +29,11 @@ module DataKeys {
     const E_PLAYING_STATUS = "playingStatus";
     const E_IS_DELETED = "isDeleted";
 
+    // Podcast artwork/color fields (from proxy enrichment)
+    const P_ART_COLOR = "artColor";
+    const P_ART_TINT = "artTint";
+    const P_ART_URL = "artUrl";
+
     // Playing status values
     const STATUS_NOT_PLAYED = 0;
     const STATUS_IN_PROGRESS = 2;
@@ -57,6 +62,44 @@ module DataFormat {
         var secs = seconds % 60;
         var secsStr = secs < 10 ? "0" + secs.toString() : secs.toString();
         return mins.toString() + ":" + secsStr;
+    }
+
+    //! Parse "#RRGGBB" hex string to CIQ color integer (0xRRGGBB)
+    function parseHexColor(hex as String) as Number {
+        if (hex.length() < 7) { return 0x333333; }
+        var r = hexPairToDec(hex.substring(1, 3) as String);
+        var g = hexPairToDec(hex.substring(3, 5) as String);
+        var b = hexPairToDec(hex.substring(5, 7) as String);
+        return (r << 16) | (g << 8) | b;
+    }
+
+    //! Convert 2-char hex string to integer (0-255)
+    function hexPairToDec(hex as String) as Number {
+        var result = 0;
+        for (var i = 0; i < hex.length(); i++) {
+            var c = hex.substring(i, i + 1) as String;
+            var val = 0;
+            if (c.equals("A") || c.equals("a")) { val = 10; }
+            else if (c.equals("B") || c.equals("b")) { val = 11; }
+            else if (c.equals("C") || c.equals("c")) { val = 12; }
+            else if (c.equals("D") || c.equals("d")) { val = 13; }
+            else if (c.equals("E") || c.equals("e")) { val = 14; }
+            else if (c.equals("F") || c.equals("f")) { val = 15; }
+            else {
+                var n = c.toNumber();
+                val = n != null ? (n as Number) : 0;
+            }
+            result = result * 16 + val;
+        }
+        return result;
+    }
+
+    //! Dim a color by a factor (0.0-1.0) for AMOLED background tinting
+    function dimColor(color as Number, factor as Float) as Number {
+        var r = (((color >> 16) & 0xFF) * factor).toNumber();
+        var g = (((color >> 8) & 0xFF) * factor).toNumber();
+        var b = ((color & 0xFF) * factor).toNumber();
+        return (r << 16) | (g << 8) | b;
     }
 
     //! Truncate text to fit within maxWidth pixels, appending "..." if needed.

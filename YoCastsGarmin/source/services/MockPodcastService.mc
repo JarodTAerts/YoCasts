@@ -64,7 +64,10 @@ class MockPodcastService extends IPodcastService {
                 DataKeys.P_AUTHOR => "Changelog Media",
                 DataKeys.P_DESCRIPTION => "Conversations with the hackers, leaders, and innovators of software.",
                 DataKeys.P_LAST_EPISODE => "2026-04-10T14:00:00Z",
-                DataKeys.P_LAST_EPISODE_UUID => "ep-chlog-001"
+                DataKeys.P_LAST_EPISODE_UUID => "ep-chlog-001",
+                DataKeys.P_ART_COLOR => 0x02D35F,
+                DataKeys.P_ART_TINT => 0x55FF99,
+                DataKeys.P_ART_URL => ""
             },
             {
                 DataKeys.P_UUID => "b2c3d4e5-2222-3333-4444-555566667777",
@@ -72,7 +75,10 @@ class MockPodcastService extends IPodcastService {
                 DataKeys.P_AUTHOR => "Wes Bos & Scott Tolinski",
                 DataKeys.P_DESCRIPTION => "A Tasty Treats podcast for web developers.",
                 DataKeys.P_LAST_EPISODE => "2026-04-09T10:00:00Z",
-                DataKeys.P_LAST_EPISODE_UUID => "ep-syntax-001"
+                DataKeys.P_LAST_EPISODE_UUID => "ep-syntax-001",
+                DataKeys.P_ART_COLOR => 0xF5C24D,
+                DataKeys.P_ART_TINT => 0xFFE066,
+                DataKeys.P_ART_URL => ""
             },
             {
                 DataKeys.P_UUID => "c3d4e5f6-3333-4444-5555-666677778888",
@@ -80,7 +86,10 @@ class MockPodcastService extends IPodcastService {
                 DataKeys.P_AUTHOR => "Dan Carlin",
                 DataKeys.P_DESCRIPTION => "In-depth historical narratives.",
                 DataKeys.P_LAST_EPISODE => "2026-03-15T08:00:00Z",
-                DataKeys.P_LAST_EPISODE_UUID => "ep-hh-001"
+                DataKeys.P_LAST_EPISODE_UUID => "ep-hh-001",
+                DataKeys.P_ART_COLOR => 0x8B0000,
+                DataKeys.P_ART_TINT => 0xFF4444,
+                DataKeys.P_ART_URL => ""
             },
             {
                 DataKeys.P_UUID => "d4e5f6a7-4444-5555-6666-777788889999",
@@ -88,7 +97,10 @@ class MockPodcastService extends IPodcastService {
                 DataKeys.P_AUTHOR => "Trail Runners United",
                 DataKeys.P_DESCRIPTION => "Tips, stories, and interviews from the trail running world.",
                 DataKeys.P_LAST_EPISODE => "2026-04-08T06:00:00Z",
-                DataKeys.P_LAST_EPISODE_UUID => "ep-rwtp-001"
+                DataKeys.P_LAST_EPISODE_UUID => "ep-rwtp-001",
+                DataKeys.P_ART_COLOR => 0x2ECC71,
+                DataKeys.P_ART_TINT => 0x7DCEA0,
+                DataKeys.P_ART_URL => ""
             },
             {
                 DataKeys.P_UUID => "e5f6a7b8-5555-6666-7777-888899990000",
@@ -96,7 +108,10 @@ class MockPodcastService extends IPodcastService {
                 DataKeys.P_AUTHOR => "Wearable Weekly",
                 DataKeys.P_DESCRIPTION => "Everything about Garmin devices, firmware, and fitness tech.",
                 DataKeys.P_LAST_EPISODE => "2026-04-07T12:00:00Z",
-                DataKeys.P_LAST_EPISODE_UUID => "ep-gunbox-001"
+                DataKeys.P_LAST_EPISODE_UUID => "ep-gunbox-001",
+                DataKeys.P_ART_COLOR => 0x0085CA,
+                DataKeys.P_ART_TINT => 0x33BBFF,
+                DataKeys.P_ART_URL => ""
             }
         ] as Array<Dictionary>;
     }

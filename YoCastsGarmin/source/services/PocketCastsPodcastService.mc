@@ -13,6 +13,13 @@ import Toybox.System;
 //! Each stage is async; when a stage completes it chains into the next.
 //! Views use synchronous getters that return cached data; the service
 //! calls WatchUi.requestUpdate() whenever the cache is refreshed.
+//!
+//! == Proxy Architecture ==
+//! Login goes DIRECT to api.pocketcasts.com — we need to get the token.
+//! All other API calls route through an Azure Function proxy (PROXY_BASE)
+//! that strips heavy fields (description, descriptionHtml, etc.) to keep
+//! responses under the Garmin CIQ ~32KB limit. The proxy forwards the
+//! Bearer token as-is — no credentials are stored server-side.
 class PocketCastsPodcastService extends IPodcastService {
 
     // ---- Auth State ----
@@ -41,7 +48,13 @@ class PocketCastsPodcastService extends IPodcastService {
     private var _episodeFetchBusy as Boolean = false;
 
     // ---- Constants ----
+    // Direct PocketCasts API — used ONLY for login and token refresh
     private const API_BASE = "https://api.pocketcasts.com";
+    // Azure Function proxy — strips large fields to stay under CIQ ~32KB limit.
+    // Update this URL after deploying the Azure Function.
+    // For local testing: "http://localhost:7071/api/pocketcasts"
+    // For Azure:         "https://yocasts-proxy-personal.azurewebsites.net/api/pocketcasts"
+    private const PROXY_BASE = "https://yocasts-proxy-personal.azurewebsites.net/api/pocketcasts";
     private const TOKEN_REFRESH_BUFFER = 300; // refresh 5 min before expiry
     private const MAX_PODCASTS = 30;
     private const MAX_QUEUE = 20;
@@ -262,13 +275,20 @@ class PocketCastsPodcastService extends IPodcastService {
 
     //! Map API podcast dict → DataKeys-keyed dict
     private function _transformPodcast(p as Dictionary) as Dictionary {
+        var artColorStr = _strOr(p.get("artColor"), "");
+        var artTintStr = _strOr(p.get("artTint"), "");
+        var artColor = artColorStr.length() >= 7 ? DataFormat.parseHexColor(artColorStr) : 0x333333;
+        var artTint = artTintStr.length() >= 7 ? DataFormat.parseHexColor(artTintStr) : 0xAAAAAA;
         return {
             DataKeys.P_UUID => _strOr(p.get("uuid"), ""),
             DataKeys.P_TITLE => _strOr(p.get("title"), "Untitled"),
             DataKeys.P_AUTHOR => _strOr(p.get("author"), ""),
             DataKeys.P_DESCRIPTION => _strOr(p.get("description"), ""),
             DataKeys.P_LAST_EPISODE => _strOr(p.get("lastEpisodePublished"), ""),
-            DataKeys.P_LAST_EPISODE_UUID => _strOr(p.get("lastEpisodeUuid"), "")
+            DataKeys.P_LAST_EPISODE_UUID => _strOr(p.get("lastEpisodeUuid"), ""),
+            DataKeys.P_ART_COLOR => artColor,
+            DataKeys.P_ART_TINT => artTint,
+            DataKeys.P_ART_URL => _strOr(p.get("artUrl"), "")
         } as Dictionary;
     }
 
@@ -482,7 +502,8 @@ class PocketCastsPodcastService extends IPodcastService {
     // Helpers
     // ================================================================
 
-    //! Make an authenticated POST request with Bearer token
+    //! Make an authenticated POST request through the Azure proxy with Bearer token.
+    //! All data-fetching calls go through the proxy; login/token refresh go direct.
     private function _makeAuthPost(path as String, body as Dictionary<Object, Object>,
                                     callback as Method(responseCode as Number, data as Dictionary or String or Null) as Void) as Void {
         // Proactive token refresh
@@ -491,7 +512,7 @@ class PocketCastsPodcastService extends IPodcastService {
         }
 
         Communications.makeWebRequest(
-            API_BASE + path,
+            PROXY_BASE + path,
             body,
             {
                 :method => Communications.HTTP_REQUEST_METHOD_POST,

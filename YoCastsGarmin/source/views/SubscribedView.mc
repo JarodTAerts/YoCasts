@@ -1,6 +1,7 @@
 import Toybox.Lang;
 import Toybox.WatchUi;
 import Toybox.System;
+import Toybox.Graphics;
 
 //! Subscribed Podcasts list view.
 //! Shows all podcasts the user is subscribed to via PocketCasts.
@@ -34,7 +35,9 @@ class SubscribedView extends WatchUi.Menu2 {
             var author = pod[DataKeys.P_AUTHOR] as String;
             var uuid = pod[DataKeys.P_UUID] as String;
 
-            addItem(new WatchUi.MenuItem(title, author, uuid, {}));
+            var artColorVal = pod.get(DataKeys.P_ART_COLOR);
+            var color = (artColorVal != null && artColorVal instanceof Number) ? (artColorVal as Number) : 0x333333;
+            addItem(new PodcastMenuItem(uuid, title, author, color));
         }
     }
 }
@@ -67,5 +70,63 @@ class SubscribedDelegate extends WatchUi.Menu2InputDelegate {
 
     function onBack() as Void {
         WatchUi.popView(WatchUi.SLIDE_DOWN);
+    }
+}
+
+//! Custom menu item with podcast brand color background tint
+//! and colored initial circle for visual identity.
+class PodcastMenuItem extends WatchUi.CustomMenuItem {
+
+    private var _title as String;
+    private var _author as String;
+    private var _brandColor as Number;
+
+    function initialize(id as String, title as String, author as String, brandColor as Number) {
+        CustomMenuItem.initialize(id, {});
+        setLabel(title);
+        _title = title;
+        _author = author;
+        _brandColor = brandColor;
+    }
+
+    function draw(dc as Graphics.Dc) as Void {
+        var w = dc.getWidth();
+        var h = dc.getHeight();
+
+        // Dimmed brand color background — brighter when focused
+        var factor = isFocused() ? 0.35 : 0.20;
+        var bgColor = DataFormat.dimColor(_brandColor, factor);
+        dc.setColor(Graphics.COLOR_WHITE, bgColor);
+        dc.clear();
+
+        // Brand-colored initial circle
+        var iconCX = 26;
+        var iconCY = h / 2;
+        dc.setColor(_brandColor, Graphics.COLOR_TRANSPARENT);
+        dc.fillCircle(iconCX, iconCY, 15);
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        var initial = _title.substring(0, 1);
+        if (initial != null) {
+            dc.drawText(iconCX, iconCY - dc.getFontHeight(Graphics.FONT_XTINY) / 2,
+                        Graphics.FONT_XTINY, initial as String,
+                        Graphics.TEXT_JUSTIFY_CENTER);
+        }
+
+        // Title and author — vertically centered to the right of icon
+        var textX = 50;
+        var maxTextW = w - textX - 8;
+        var titleH = dc.getFontHeight(Graphics.FONT_TINY);
+        var authorH = dc.getFontHeight(Graphics.FONT_XTINY);
+        var startY = (h - titleH - 2 - authorH) / 2;
+
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(textX, startY, Graphics.FONT_TINY,
+                    DataFormat.truncateText(dc, _title, Graphics.FONT_TINY, maxTextW),
+                    Graphics.TEXT_JUSTIFY_LEFT);
+
+        dc.setColor(0xBBBBBB, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(textX, startY + titleH + 2, Graphics.FONT_XTINY,
+                    DataFormat.truncateText(dc, _author, Graphics.FONT_XTINY, maxTextW),
+                    Graphics.TEXT_JUSTIFY_LEFT);
     }
 }
