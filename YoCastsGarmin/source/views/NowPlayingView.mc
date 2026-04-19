@@ -15,6 +15,10 @@ class NowPlayingView extends WatchUi.View {
     private var _currentPosition as Number;
     private var _positionTracker as PositionTracker;
 
+    // Brand colors looked up from podcast data
+    private var _brandColor as Number = 0x55AAFF;
+    private var _brandTint as Number = 0xFFFFFF;
+
     // --- Layout constants from spec §7.2 ---
     private const CX = 195;
     private const CY = 195;
@@ -76,6 +80,14 @@ class NowPlayingView extends WatchUi.View {
             episode[DataKeys.E_DURATION] as Number,
             false
         );
+
+        // Look up podcast brand colors from cache
+        var podcasts = CacheManager.loadPodcasts();
+        if (podcasts != null && !podUuid.equals("")) {
+            var colors = DataFormat.lookupPodcastColors(podcasts as Array<Dictionary>, podUuid);
+            _brandColor = colors[0] as Number;
+            _brandTint = colors[1] as Number;
+        }
     }
 
     function onShow() as Void {
@@ -150,8 +162,9 @@ class NowPlayingView extends WatchUi.View {
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
-        // Clear background (AMOLED true black)
-        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
+        // Clear background — subtle brand color wash on AMOLED
+        var bgWash = DataFormat.dimColor(DataFormat.brightenColor(_brandColor, 40), 0.10);
+        dc.setColor(bgWash, bgWash);
         dc.clear();
 
         var duration = _episode[DataKeys.E_DURATION] as Number;
@@ -163,19 +176,21 @@ class NowPlayingView extends WatchUi.View {
         dc.setPenWidth(ARC_PEN);
         dc.drawArc(CX, CY, ARC_RADIUS, Graphics.ARC_CLOCKWISE, 0, 360);
 
-        // 2. Progress arc fill (accent blue, proportional)
+        // 2. Progress arc fill — brand color, brightened for visibility
         if (duration > 0 && _currentPosition > 0) {
             var progress = _currentPosition.toFloat() / duration.toFloat();
             if (progress > 1.0) { progress = 1.0; }
             var degrees = (progress * 360.0).toNumber();
-            dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+            var arcColor = DataFormat.brightenColor(_brandColor, 200);
+            dc.setColor(arcColor, Graphics.COLOR_TRANSPARENT);
             dc.drawArc(CX, CY, ARC_RADIUS, Graphics.ARC_CLOCKWISE, 90, 90 - degrees);
         }
         dc.setPenWidth(1);
 
-        // 3. Podcast name (top, gray, marquee)
+        // 3. Podcast name (top, brand-tinted)
+        var podColor = DataFormat.dimColor(DataFormat.brightenColor(_brandTint, 180), 0.7);
         drawMarqueeText(dc, podcastTitle, Graphics.FONT_XTINY,
-                        0xAAAAAA, CX, PODCAST_Y, PODCAST_MAX_W,
+                        podColor, CX, PODCAST_Y, PODCAST_MAX_W,
                         _podOffset, false);
 
         // 4. Episode title (center, white, FONT_MEDIUM, marquee)
@@ -186,7 +201,7 @@ class NowPlayingView extends WatchUi.View {
         // 5. Control buttons
         drawControls(dc);
 
-        // 6. Time display (bottom, gray)
+        // 6. Time display (bottom, dimmed tint)
         dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
         var timeStr = DataFormat.formatTime(_currentPosition) + " / " + DataFormat.formatTime(duration);
         dc.drawText(CX, TIME_Y, Graphics.FONT_TINY, timeStr,
@@ -195,10 +210,14 @@ class NowPlayingView extends WatchUi.View {
 
     //! Draw the three control buttons: skip back, play/pause, skip forward
     private function drawControls(dc as Graphics.Dc) as Void {
-        // --- Skip Back button (left, gray circle) ---
-        dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
+        var skipBg = DataFormat.dimColor(DataFormat.brightenColor(_brandColor, 60), 0.35);
+        var skipFg = DataFormat.dimColor(DataFormat.brightenColor(_brandTint, 180), 0.7);
+        var playBtnColor = DataFormat.brightenColor(_brandColor, 200);
+
+        // --- Skip Back button (left, brand-tinted circle) ---
+        dc.setColor(skipBg, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(SKIP_BACK_CX, CONTROLS_Y, SKIP_R);
-        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(skipFg, Graphics.COLOR_TRANSPARENT);
         // Rewind icon: two left-pointing triangles + bar
         var bx = SKIP_BACK_CX;
         var by = CONTROLS_Y;
@@ -206,8 +225,8 @@ class NowPlayingView extends WatchUi.View {
         dc.fillPolygon([[bx + 10, by - 8], [bx + 10, by + 8], [bx, by]]);
         dc.fillRectangle(bx - 10, by - 8, 2, 16);
 
-        // --- Play/Pause button (center, accent circle) ---
-        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        // --- Play/Pause button (center, brand accent circle) ---
+        dc.setColor(playBtnColor, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(PLAY_CX, CONTROLS_Y, PLAY_R);
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
         if (_isPlaying) {
@@ -221,10 +240,10 @@ class NowPlayingView extends WatchUi.View {
                             [PLAY_CX + 14, CONTROLS_Y]]);
         }
 
-        // --- Skip Forward button (right, gray circle) ---
-        dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
+        // --- Skip Forward button (right, brand-tinted circle) ---
+        dc.setColor(skipBg, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(SKIP_FWD_CX, CONTROLS_Y, SKIP_R);
-        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(skipFg, Graphics.COLOR_TRANSPARENT);
         // Fast-forward icon: two right-pointing triangles + bar
         var fx = SKIP_FWD_CX;
         var fy = CONTROLS_Y;

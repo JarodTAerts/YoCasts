@@ -15,7 +15,8 @@ class EpisodeListView extends WatchUi.CustomMenu {
     private var _menuTitle as String;
 
     function initialize(service as IPodcastService, podcastUuid as String, podcastTitle as String) {
-        CustomMenu.initialize(80, Graphics.COLOR_BLACK, {:titleItemHeight => 50});
+        // titleItemHeight=90 pushes first item below the narrow top of round display
+        CustomMenu.initialize(80, Graphics.COLOR_BLACK, {:titleItemHeight => 90});
         _service = service;
         _podcastUuid = podcastUuid;
         _menuTitle = podcastTitle;
@@ -26,11 +27,12 @@ class EpisodeListView extends WatchUi.CustomMenu {
         System.println("YoCasts: EpisodeListView initialized (CustomMenu) for '" + podcastTitle + "'");
     }
 
-    //! Draw the podcast title area — centered for round display
+    //! Draw the podcast title area — text near bottom so it clears the round bezel
     function drawTitle(dc as Graphics.Dc) as Void {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
-        dc.drawText(dc.getWidth() / 2, dc.getHeight() / 2 - dc.getFontHeight(Graphics.FONT_SMALL) / 2,
+        var fh = dc.getFontHeight(Graphics.FONT_SMALL);
+        dc.drawText(dc.getWidth() / 2, dc.getHeight() - fh - 6,
                     Graphics.FONT_SMALL, _menuTitle, Graphics.TEXT_JUSTIFY_CENTER);
     }
 

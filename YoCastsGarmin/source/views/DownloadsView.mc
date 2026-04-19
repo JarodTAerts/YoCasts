@@ -6,14 +6,14 @@ import Toybox.Timer;
 
 //! Downloads view — shows all downloaded and in-progress episodes.
 //! Custom View with 80px items, scrollable via swipe/buttons.
-//! Follows the same visual language as HomeMenuView (dark bg, accent blue,
-//! rounded pill items).
+//! Uses podcast brand color tinting (same pattern as QueueView/EpisodeListView).
 class DownloadsView extends WatchUi.View {
 
     private var _scrollOffset as Number = 0;
     private var _selectedIndex as Number = 0;
     private var _toastMessage as String? = null;
     private var _toastTimer as Timer.Timer? = null;
+    private var _podcasts as Array<Dictionary>?;
 
     // Layout constants matching HomeMenuView spec
     private const ITEM_HEIGHT = 80;
@@ -29,6 +29,7 @@ class DownloadsView extends WatchUi.View {
 
     function initialize() {
         View.initialize();
+        _podcasts = CacheManager.loadPodcasts();
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
@@ -39,7 +40,7 @@ class DownloadsView extends WatchUi.View {
         var cx = 195;
 
         // Title
-        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
         dc.drawText(cx, 30, Graphics.FONT_MEDIUM, "Downloads",
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
@@ -47,6 +48,8 @@ class DownloadsView extends WatchUi.View {
             drawEmptyState(dc, cx);
             return;
         }
+
+        var podcasts = _podcasts != null ? _podcasts as Array<Dictionary> : [] as Array<Dictionary>;
 
         // Clip to content area (below title, above bottom curve)
         dc.setClip(0, VISIBLE_TOP, 390, VISIBLE_BOTTOM - VISIBLE_TOP);
@@ -61,7 +64,15 @@ class DownloadsView extends WatchUi.View {
 
             var dl = downloads[i] as Dictionary;
             var isSelected = (i == _selectedIndex);
-            drawDownloadItem(dc, dl, ITEM_X, itemY, isSelected);
+
+            // Look up podcast brand colors
+            var podUuidVal = dl.get(DownloadQueue.DL_PODCAST_UUID);
+            var podUuid = (podUuidVal != null) ? podUuidVal as String : "";
+            var colors = DataFormat.lookupPodcastColors(podcasts, podUuid);
+            var artColor = colors[0] as Number;
+            var artTint = colors[1] as Number;
+
+            drawDownloadItem(dc, dl, ITEM_X, itemY, isSelected, artColor, artTint);
         }
 
         dc.clearClip();
@@ -75,20 +86,25 @@ class DownloadsView extends WatchUi.View {
         }
     }
 
-    //! Draw a single download item pill
+    //! Draw a single download item pill with podcast brand color tinting
     private function drawDownloadItem(dc as Graphics.Dc, dl as Dictionary,
                                        x as Number, y as Number,
-                                       isSelected as Boolean) as Void {
+                                       isSelected as Boolean,
+                                       artColor as Number,
+                                       artTint as Number) as Void {
         var status = dl[DownloadQueue.DL_STATUS] as Number;
 
-        // Background pill
-        var bg = isSelected ? 0x252545 : 0x1A1A2E;
-        dc.setColor(bg, Graphics.COLOR_TRANSPARENT);
+        // Background pill — brand-tinted (same pattern as QueueEpisodeMenuItem)
+        var boosted = DataFormat.brightenColor(artColor, 80);
+        var factor = isSelected ? 0.55 : 0.30;
+        var bgColor = DataFormat.dimColor(boosted, factor);
+        dc.setColor(bgColor, Graphics.COLOR_TRANSPARENT);
         dc.fillRoundedRectangle(x, y, ITEM_WIDTH, ITEM_HEIGHT, ITEM_CORNER_R);
 
-        // Selection border
+        // Selection border — brightened brand color
         if (isSelected) {
-            dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+            var borderColor = DataFormat.brightenColor(artColor, 160);
+            dc.setColor(borderColor, Graphics.COLOR_TRANSPARENT);
             dc.setPenWidth(2);
             dc.drawRoundedRectangle(x, y, ITEM_WIDTH, ITEM_HEIGHT, ITEM_CORNER_R);
             dc.setPenWidth(1);
@@ -104,9 +120,10 @@ class DownloadsView extends WatchUi.View {
         var textX = x + 44;
         var maxTextW = ITEM_WIDTH - 60;
 
-        // Episode title (white, top of pill)
+        // Episode title — tinted brand color with contrast check
         var title = dl[DownloadQueue.DL_TITLE] as String;
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        var titleColor = DataFormat.ensureContrast(artTint, bgColor);
+        dc.setColor(titleColor, Graphics.COLOR_TRANSPARENT);
         var truncTitle = DataFormat.truncateText(dc, title, Graphics.FONT_SMALL, maxTextW);
         dc.drawText(textX, y + 14, Graphics.FONT_SMALL, truncTitle,
                     Graphics.TEXT_JUSTIFY_LEFT);
@@ -126,8 +143,10 @@ class DownloadsView extends WatchUi.View {
             subColor = 0x55AAFF;
         }
 
-        // Draw podcast title in gray, then status in its color
-        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
+        // Draw podcast title in dimmed tint, then status in its color
+        var subTintColor = DataFormat.dimColor(artTint, 0.6);
+        subTintColor = DataFormat.ensureContrast(subTintColor, bgColor);
+        dc.setColor(subTintColor, Graphics.COLOR_TRANSPARENT);
         var truncPod = DataFormat.truncateText(dc, podTitle, Graphics.FONT_XTINY, maxTextW - 80);
         dc.drawText(textX, y + 46, Graphics.FONT_XTINY, truncPod + " | ",
                     Graphics.TEXT_JUSTIFY_LEFT);
@@ -152,7 +171,8 @@ class DownloadsView extends WatchUi.View {
             if (progress > 0) {
                 var fillW = (barW * progress / 100);
                 if (fillW < 1) { fillW = 1; }
-                dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+                var barAccent = DataFormat.brightenColor(artColor, 160);
+                dc.setColor(barAccent, Graphics.COLOR_TRANSPARENT);
                 dc.fillRoundedRectangle(barX, barY, fillW, barH, 1);
             }
         }
@@ -264,10 +284,10 @@ class DownloadsView extends WatchUi.View {
         var toastX = cx - toastW / 2;
 
         // Semi-transparent dark background
-        dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(0x222233, Graphics.COLOR_TRANSPARENT);
         dc.fillRoundedRectangle(toastX, toastY, toastW, toastH, 12);
 
-        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(0x888888, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(1);
         dc.drawRoundedRectangle(toastX, toastY, toastW, toastH, 12);
 

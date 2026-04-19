@@ -12,17 +12,19 @@ class SubscribedView extends WatchUi.CustomMenu {
     private var _service as IPodcastService;
 
     function initialize(service as IPodcastService) {
-        CustomMenu.initialize(80, Graphics.COLOR_BLACK, {:titleItemHeight => 50});
+        // titleItemHeight=90 pushes first item below the narrow top of round display
+        CustomMenu.initialize(80, Graphics.COLOR_BLACK, {:titleItemHeight => 90});
         _service = service;
         loadPodcasts();
         System.println("YoCasts: SubscribedView initialized (CustomMenu)");
     }
 
-    //! Draw the "Podcasts" title area — centered for round display
+    //! Draw the "Podcasts" title area — text near bottom so it clears the round bezel
     function drawTitle(dc as Graphics.Dc) as Void {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
-        dc.drawText(dc.getWidth() / 2, dc.getHeight() / 2 - dc.getFontHeight(Graphics.FONT_SMALL) / 2,
+        var fh = dc.getFontHeight(Graphics.FONT_SMALL);
+        dc.drawText(dc.getWidth() / 2, dc.getHeight() - fh - 6,
                     Graphics.FONT_SMALL, "Podcasts", Graphics.TEXT_JUSTIFY_CENTER);
     }
 
@@ -49,7 +51,11 @@ class SubscribedView extends WatchUi.CustomMenu {
             var artTintVal = pod.get(DataKeys.P_ART_TINT);
             var color = (artColorVal != null && artColorVal instanceof Number) ? (artColorVal as Number) : 0x333333;
             var tint = (artTintVal != null && artTintVal instanceof Number) ? (artTintVal as Number) : 0xFFFFFF;
-            System.println("YoCasts: podcast '" + title + "' color=0x" + color.format("%06X") + " tint=0x" + tint.format("%06X"));
+
+            // Log artUrl for future cover art feature investigation
+            var artUrlVal = pod.get(DataKeys.P_ART_URL);
+            var artUrl = (artUrlVal != null && artUrlVal instanceof String) ? artUrlVal as String : "";
+            System.println("YoCasts: podcast '" + title + "' color=0x" + color.format("%06X") + " tint=0x" + tint.format("%06X") + " artUrl='" + artUrl + "'");
             addItem(new PodcastMenuItem(uuid, title, author, color, tint));
         }
         System.println("YoCasts: loadPodcasts() — added " + limit + " PodcastMenuItems to CustomMenu");
@@ -156,8 +162,23 @@ class PodcastMenuItem extends WatchUi.CustomMenuItem {
         }
 
         // Polished initial circle — large, with ring border
-        // TODO: Future work — load actual cover art via Communications.makeImageRequest()
-        // using DataKeys.P_ART_URL. For now, show a styled initial circle.
+        // --- PODCAST ART IMPLEMENTATION PLAN ---
+        // artUrl is available in the podcast dict (DataKeys.P_ART_URL) as a URL string.
+        // Implementation approach for cover art thumbnails:
+        //  1. Add a module-level image cache: Dictionary<String, BitmapResource> keyed by podcast UUID
+        //  2. In PodcastMenuItem.initialize(), call Communications.makeImageRequest(artUrl, null,
+        //     {:maxWidth=>40, :maxHeight=>40, :dithering=>Communications.IMAGE_DITHERING_FLOYD_STEINBERG},
+        //     callback) to request the image asynchronously
+        //  3. In the callback, store the BitmapResource in the cache dict and call WatchUi.requestUpdate()
+        //  4. In draw(), check if cache has a bitmap for this podcast UUID:
+        //     - If yes: dc.drawBitmap(iconCX - circleR, iconCY - circleR, bitmap)
+        //     - If no: draw the initial-letter circle as fallback (current behavior)
+        //  5. Memory concern: 40x40 RGBA = ~6.4KB per image. Cap at 10 cached images (~64KB).
+        //     Evict LRU when cache exceeds limit.
+        //  6. Requires `import Toybox.Communications;` and phone connection for image fetch.
+        //  7. CustomMenuItem.draw() is called by the runtime — images load after a moment,
+        //     then the list visually updates with art replacing initial circles.
+        // For now, show a styled initial circle.
         var iconCX = marginX + 32;
         var iconCY = h / 2;
         var circleR = 20;

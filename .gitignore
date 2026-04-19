@@ -272,3 +272,6 @@ PocketcastsApiTesting/**/test-results/
 .squad/sessions/
 # Squad: SubSquad activation file (local to this machine)
 .squad-workstream
+
+# Garmin CIQ: Local simulator credentials (never commit)
+YoCastsGarmin/source/sim/LocalCredentials.mc

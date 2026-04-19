@@ -1,0 +1,6 @@
+project.manifest = manifest.simulator.xml
+
+# Simulator build — watch-app type (no media stubs needed)
+# Uses source/sim/ for AppBase entry point instead of source/ AudioContentProviderApp
+base.sourcePath = source/sim;source/views;source/services;source/models
+base.resourcePath = resources

@@ -1,10 +1,11 @@
 # YoCasts — Garmin Layout Reference (Pixel-Perfect)
 
-> **Version:** 1.0  
+> **Version:** 2.0  
 > **Author:** Kaylee (Garmin Dev)  
 > **Date:** 2026-04-13  
 > **Device:** Garmin Venu 4 41mm — 390×390 round AMOLED  
-> **Status:** Authoritative reference — all UI code must conform to this spec
+> **Status:** Authoritative reference — all UI code must conform to this spec  
+> **v2.0 change:** Section 5 rewritten for split-dock home menu design
 
 ---
 
@@ -14,7 +15,7 @@
 2. [Font Reference](#2-font-reference)
 3. [Drawing API Reference](#3-drawing-api-reference)
 4. [Touch & Input Reference](#4-touch--input-reference)
-5. [Home Menu Layout Spec](#5-home-menu-layout-spec)
+5. [Home Menu Layout Spec — Split-Dock Design](#5-home-menu-layout-spec--split-dock-design)
 6. [List View Layout Spec](#6-list-view-layout-spec)
 7. [Now Playing Screen Layout Spec](#7-now-playing-screen-layout-spec)
 8. [Color Palette](#8-color-palette)
@@ -374,272 +375,608 @@ function isPointInCircle(tapX as Number, tapY as Number,
 
 ---
 
-## 5. Home Menu Layout Spec
+## 5. Home Menu Layout Spec — Split-Dock Design
+
+> **Replaces:** Previous single-zone pill layout (v1.0)  
+> **Design:** Two-zone split screen — scrollable menu + fixed "Now Playing" dock
 
 ### 5.1 — Overview
 
-The home menu is a custom `View` (not Menu2) with three tappable "pills":
+The home screen is divided into two zones:
 
-1. **Queue** — shows episode count
-2. **Podcasts** — shows subscription count
-3. **Now Playing** — shows current episode with progress
+1. **Upper 2/3 — Scrollable Menu (Y=0 to Y=260):** Tappable pill/card items (Queue, Podcasts, Settings) that scroll vertically. Items scroll _under_ the dock when swiping.
+2. **Bottom 1/3 — Static Now Playing Dock (Y=260 to Y=390):** Fixed overlay showing current playback info, progress, and a play/pause tap zone at the bottom edge.
 
-All pills are rounded rectangles drawn with `fillRoundedRectangle()`.
+The dock is rendered **on top of** the scrollable content. The scrollable zone's drawing is clipped at Y=260 so items disappear behind the dock as they scroll past.
 
-### 5.2 — Layout Constants
+### 5.2 — Full Screen Layout Diagram
+
+```
+                ╭──────────────────╮
+             ╱                        ╲        Y=0
+           ╱   ┌─────── YoCasts ──────┐  ╲     Y=15 (title)
+         ╱     └──────────────────────┘    ╲
+        │                                    │  Y=40
+        │  ┌────────────────────────────┐    │
+        │  │         QUEUE              │    │  Y=50 ── pill top
+        │  │         3 episodes         │    │
+        │  └────────────────────────────┘    │  Y=110
+        │                                    │
+        │  ┌──────────────────────────────┐  │
+        │  │         PODCASTS             │  │  Y=122 ── pill top
+        │  │         5 subscriptions      │  │
+        │  └──────────────────────────────┘  │  Y=182
+        │                                    │
+        │  ┌──────────────────────────────┐  │
+        │  │    ⚙    SETTINGS             │  │  Y=194 ── pill top
+        │  │         Playback, downloads  │  │
+        │  └──────────────────────────────┘  │  Y=254
+  ─ ─ ─│─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─│─ Y=260 ══ DOCK TOP
+        │  ┄┄┄┄┄┄┄ divider line ┄┄┄┄┄┄┄┄┄  │  Y=260 (1px line)
+        │                                    │
+        │     The Daily • NYT               │  Y=268 podcast name
+        │     Why AI Can't Replace...       │  Y=302 episode title
+        │                                    │
+        │     ████████░░░░░░░░░░░░░         │  Y=338 progress bar
+        │        12:34 / 45:00              │  Y=346 time display
+         ╲                                ╱
+           ╲        [ ▶ ]              ╱     Y=375 play/pause
+             ╲                      ╱        Y=385
+                ╰──────────────────╯         Y=390
+```
+
+### 5.3 — Zone Boundaries
+
+| Zone | Y Start | Y End | Height | Purpose |
+|---|---|---|---|---|
+| Title area | 0 | 40 | 40 px | "YoCasts" header (in top dead zone) |
+| Scrollable menu | 40 | 260 | 220 px | Tappable pill items, scrollable |
+| **Dock** | **260** | **390** | **130 px** | **Fixed Now Playing overlay** |
+| Dock info zone | 260 | 365 | 105 px | Podcast/episode/progress (tap → NP screen) |
+| Dock play/pause zone | 365 | 390 | 25 px | Bottom-edge tap → toggle playback |
+
+### 5.4 — Now Playing Dock (Y=260–390)
+
+The dock is a **fixed overlay** that never scrolls. It is drawn _after_ the scrollable content, covering anything beneath it. Scrollable items are clipped at Y=260 via `dc.setClip()`.
+
+#### 5.4.1 — Dock Layout Constants
 
 ```monkeyc
-// Screen metrics
-const SCREEN_W = 390;
-const SCREEN_H = 390;
-const CENTER_X = 195;
-const CENTER_Y = 195;
+// Zone boundary
+const DOCK_TOP = 260;
+const DOCK_BOTTOM = 390;               // screen bottom
+const DOCK_HEIGHT = 130;               // 390 - 260
 
-// Viewport (visible scrollable area)
-const VIEWPORT_TOP = 50;           // Y start of visible area
-const VIEWPORT_HEIGHT = 290;       // 50 to 340
-const VIEWPORT_BOTTOM = 340;       // Y end of visible area
+// Element Y positions (top of text/element)
+const DOCK_DIVIDER_Y = 260;           // 1px divider line
+const DOCK_PODCAST_Y = 268;           // Podcast name text top
+const DOCK_EPISODE_Y = 302;           // Episode title text top
+const DOCK_PROGRESS_Y = 338;          // Progress bar top
+const DOCK_TIME_Y = 346;              // Time text top
+const DOCK_PLAYPAUSE_Y = 375;         // Play/Pause icon center
+
+// Touch zones
+const DOCK_PLAYPAUSE_ZONE_TOP = 365;  // Y=365–390 → play/pause
+const DOCK_INFO_ZONE_TOP = 260;       // Y=260–365 → navigate to NP screen
+
+// Progress bar
+const PROGRESS_BAR_HEIGHT = 4;
+const PROGRESS_BAR_RADIUS = 2;        // corner radius for rounded ends
+const PROGRESS_BAR_WIDTH = 200;       // fixed width, centered
+
+// Margins
+const DOCK_TEXT_MARGIN = 20;           // margin from circle edge to text
+```
+
+#### 5.4.2 — Pixel-Perfect Width Table (Dock Zone)
+
+These are the exact usable widths at each key Y position in the dock, computed from `width = 2√(195² − (y−195)²)`:
+
+| Y | dy (y−195) | Circle Width | −40px Margins | Available for Content | Used By |
+|---|---|---|---|---|---|
+| 260 | 65 | 368 px | 328 px | 328 px | Dock top edge |
+| 268 | 73 | 362 px | 322 px | 322 px | **Podcast name** |
+| 270 | 75 | 360 px | 320 px | 320 px | (reference) |
+| 280 | 85 | 351 px | 311 px | 311 px | |
+| 290 | 95 | 341 px | 301 px | 301 px | |
+| 300 | 105 | 329 px | 289 px | 289 px | |
+| 302 | 107 | 326 px | 286 px | 286 px | **Episode title** |
+| 310 | 115 | 315 px | 275 px | 275 px | |
+| 320 | 125 | 299 px | 259 px | 259 px | |
+| 330 | 135 | 281 px | 241 px | 241 px | |
+| 335 | 140 | 271 px | 231 px | 231 px | Episode text bottom |
+| 338 | 143 | 265 px | 225 px | 225 px | **Progress bar** |
+| 340 | 145 | 261 px | 221 px | 221 px | (reference) |
+| 346 | 151 | 247 px | 207 px | 207 px | **Time display** |
+| 350 | 155 | 237 px | 197 px | 197 px | |
+| 360 | 165 | 208 px | 168 px | 168 px | |
+| 365 | 170 | 191 px | 151 px | 151 px | Play/pause zone top |
+| 370 | 175 | 172 px | 132 px | 132 px | (reference) |
+| 375 | 180 | 150 px | 110 px | 110 px | **Play/pause icon** |
+| 378 | 183 | 135 px | 95 px | 95 px | |
+| 380 | 185 | 123 px | 83 px | 83 px | |
+| 385 | 190 | 88 px | 48 px | 48 px | Tight dead zone |
+| 390 | 195 | 0 px | — | — | Screen bottom |
+
+#### 5.4.3 — Dock Background
+
+**Recommended:** Solid black background with subtle top divider.
+
+Connect IQ has **no alpha blending**, so true semi-transparent gradients are not possible. Instead:
+
+```monkeyc
+// Step 1: Clip scrollable content at dock boundary
+dc.setClip(0, 0, 390, DOCK_TOP);  // scrollable area only
+// ... draw scrollable items ...
+dc.clearClip();
+
+// Step 2: Draw solid dock background
+dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
+dc.fillRectangle(0, DOCK_TOP, 390, DOCK_HEIGHT);
+
+// Step 3: Subtle top divider line
+dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
+dc.fillRectangle(getMarginAtY(DOCK_TOP), DOCK_TOP, getWidthAtY(DOCK_TOP), 1);
+
+// Step 4: Draw dock content elements on top
+// ... podcast name, episode title, progress bar, time, play/pause ...
+```
+
+**Alternative (pseudo-gradient):** Draw 3–4 horizontal lines at decreasing brightness above the divider for a fade effect:
+```monkeyc
+dc.setColor(0x111111, Graphics.COLOR_TRANSPARENT);
+dc.fillRectangle(getMarginAtY(258), 258, getWidthAtY(258), 1);
+dc.setColor(0x222222, Graphics.COLOR_TRANSPARENT);
+dc.fillRectangle(getMarginAtY(259), 259, getWidthAtY(259), 1);
+dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
+dc.fillRectangle(getMarginAtY(260), 260, getWidthAtY(260), 1);
+```
+
+#### 5.4.4 — Podcast Name (Y=268)
+
+| Property | Value |
+|---|---|
+| Y position | 268 (top of text) |
+| Y range | 268–301 (33px font height) |
+| Font | `FONT_XTINY` (33 px) |
+| Color | `0xAAAAAA` (secondary gray) |
+| Alignment | `TEXT_JUSTIFY_CENTER` at X=195 |
+| Max text width | 322 px (circle width 362 − 40px margins) |
+| Overflow | Marquee scroll (3-phase: pause → scroll 2px/tick → pause → reset) |
+| Content | Podcast name, e.g. "The Daily" |
+
+#### 5.4.5 — Episode Title (Y=302)
+
+| Property | Value |
+|---|---|
+| Y position | 302 (top of text) |
+| Y range | 302–335 (33px font height) |
+| Font | `FONT_XTINY` (33 px) |
+| Color | `0xFFFFFF` (primary white) |
+| Alignment | `TEXT_JUSTIFY_CENTER` at X=195 |
+| Max text width | 286 px (circle width 326 − 40px margins) |
+| Overflow | Marquee scroll (same timer as podcast name, staggered start) |
+| Content | Episode title, e.g. "Why AI Can't Replace Podcasters" |
+
+**Note:** Both podcast name and episode title use FONT_XTINY in the dock. This is intentional — the dock is a compact summary. The full Now Playing screen uses larger fonts for these elements.
+
+#### 5.4.6 — Progress Bar (Y=338)
+
+| Property | Value |
+|---|---|
+| Y position | 338 (top of bar) |
+| Height | 4 px |
+| Y range | 338–342 |
+| Total width | 200 px, centered (X=95 to X=295) |
+| Corner radius | 2 px (rounded ends via `fillRoundedRectangle`) |
+| Background color | `0x333333` (full bar track) |
+| Fill color | `0x55AAFF` (accent blue, proportional to elapsed/total) |
+| Available width at Y=338 | 265 px (225 px with margins) — 200px bar fits ✓ |
+
+```monkeyc
+// Background track
+dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
+dc.fillRoundedRectangle(95, 338, 200, 4, 2);
+
+// Filled portion (proportional to playback progress)
+var fillW = (elapsed * 200.0 / total).toNumber();
+if (fillW > 0) {
+    dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+    dc.fillRoundedRectangle(95, 338, fillW, 4, 2);
+}
+```
+
+#### 5.4.7 — Time Display (Y=346)
+
+| Property | Value |
+|---|---|
+| Y position | 346 (top of text) |
+| Y range | 346–379 (33px font height) |
+| Font | `FONT_XTINY` (33 px) |
+| Color | `0xAAAAAA` (secondary gray) |
+| Alignment | `TEXT_JUSTIFY_CENTER` at X=195 |
+| Max text width | 207 px (circle width 247 − 40px margins) |
+| Format | `"12:34 / 45:00"` (elapsed / total) |
+| Text width estimate | 14 chars × ~14px = ~196 px → fits in 207 px ✓ |
+
+#### 5.4.8 — Play/Pause Button (Y=365–390)
+
+This button lives in the round screen's **dead zone** — intentionally. It mirrors how Garmin system buttons conform to the bottom edge.
+
+| Property | Value |
+|---|---|
+| Icon center | (195, 378) |
+| Icon radius | 10 px |
+| Icon type | Play triangle (▶) or Pause bars (❚❚), drawn with `fillPolygon`/`fillRectangle` |
+| Icon color | `0x55AAFF` (accent blue) |
+| Available width at Y=378 | 135 px (icon at 20px wide fits easily) |
+| Touch target zone | **Y=365 to Y=390** (25 px tall, full circle width at each Y) |
+| Touch width at Y=375 | 150 px centered (X=120 to X=270) |
+| Action | Tap → toggle play/pause |
+
+```monkeyc
+// Play icon (triangle pointing right)
+var cx = 195;
+var cy = 378;
+var sz = 8;
+dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+dc.fillPolygon([[cx - sz, cy - sz], [cx - sz, cy + sz], [cx + sz, cy]]);
+
+// Pause icon (two vertical bars)
+// dc.fillRectangle(cx - 7, cy - 8, 5, 16);
+// dc.fillRectangle(cx + 2, cy - 8, 5, 16);
+```
+
+**Visual note:** The play/pause icon partially overlaps with the time text visually (time text extends to Y=379, icon centered at Y=378). This is acceptable — the icon is drawn on top of the time text's lower portion, and the dead zone narrowing naturally frames the icon.
+
+#### 5.4.9 — Dock Touch Zones
+
+```
+Y=260 ┬──────────────────────── Dock top
+      │                                     ─┐
+      │   Podcast name                       │
+      │   Episode title                      │  TAP → Navigate to
+      │   ████ progress ░░░░                 │  full Now Playing
+      │   12:34 / 45:00                      │  screen
+      │                                     ─┘
+Y=365 ┼──────────────────────── Zone boundary
+      │         [ ▶ ]                       ─┐  TAP → Toggle
+Y=390 ┴──────────────────────── Screen bottom ┘  play/pause
+```
+
+```monkeyc
+function onTap(clickEvent as ClickEvent) as Boolean {
+    var coords = clickEvent.getCoordinates();
+    var tapY = coords[1] as Number;
+
+    if (tapY >= DOCK_PLAYPAUSE_ZONE_TOP) {
+        // Bottom zone: toggle play/pause
+        _service.togglePlayPause();
+        WatchUi.requestUpdate();
+        return true;
+    } else if (tapY >= DOCK_TOP) {
+        // Dock info zone: navigate to full Now Playing screen
+        WatchUi.pushView(new NowPlayingView(_service), new NowPlayingDelegate(_service), WatchUi.SLIDE_UP);
+        return true;
+    }
+    // ... handle scrollable zone taps above Y=260 ...
+    return false;
+}
+```
+
+#### 5.4.10 — Dock Detail Diagram
+
+```
+Y=260  ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄  1px divider (0x333333)
+       │←──── 368px circle width ────→│
+Y=268  │  ←20→ Podcast Name (XTINY) ←20→ │     322px text area
+       │                                   │
+       │         (4px gap)                 │
+Y=302  │  ←20→ Episode Title (XTINY) ←20→│     286px text area
+       │                                   │
+       │         (3px gap)                 │
+Y=338  │      ┌══════════════════┐         │     200px progress bar
+       │      │████████░░░░░░░░░░│         │     4px tall, centered
+Y=342  │      └══════════════════┘         │
+       │         (4px gap)                 │
+Y=346  │    12:34 / 45:00 (XTINY)         │     207px text area
+       │                                   │
+  ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─  Y=365 play/pause zone
+       │                                   │
+Y=375    ╲      [ ▶ ] (10px r)        ╱       150px wide
+Y=378      ╲        icon center     ╱         135px wide
+              ╲                  ╱
+Y=390            ╰────────────╯                 Screen bottom
+```
+
+#### 5.4.11 — Dock Font Summary
+
+| Element | Font | Height | Color | Max Width | Marquee |
+|---|---|---|---|---|---|
+| Podcast name | FONT_XTINY | 33 px | 0xAAAAAA | 322 px | Yes |
+| Episode title | FONT_XTINY | 33 px | 0xFFFFFF | 286 px | Yes |
+| Time display | FONT_XTINY | 33 px | 0xAAAAAA | 207 px | No |
+| Progress bar | — | 4 px | 0x55AAFF / 0x333333 | 200 px | — |
+| Play/Pause icon | Drawn | 20 px | 0x55AAFF | — | — |
+
+### 5.5 — Scrollable Menu Zone (Y=0–260)
+
+#### 5.5.1 — Layout Constants
+
+```monkeyc
+// Scrollable zone
+const SCROLL_ZONE_TOP = 40;            // content starts here (below title)
+const SCROLL_ZONE_BOTTOM = 260;        // dock covers everything below
+const SCROLL_ZONE_HEIGHT = 220;        // 260 - 40
 
 // Pill dimensions
-const PILL_HEIGHT = 72;            // Queue & Podcasts pills
-const NP_PILL_HEIGHT = 110;        // Now Playing pill (larger)
-const PILL_GAP = 16;               // vertical gap between pills
-const PILL_CORNER_RADIUS = 18;     // rounded corners
-const PILL_SIDE_MARGIN = 30;       // minimum margin from pill edge to screen edge
+const PILL_HEIGHT = 60;                // each menu item pill
+const PILL_GAP = 12;                   // vertical gap between pills
+const PILL_MARGIN = 20;                // margin from circle edge to pill edge
+const PILL_CORNER_RADIUS = 16;        // rounded corners
+const PILL_INNER_PAD_X = 16;          // horizontal padding inside pill
+const PILL_INNER_PAD_Y = 8;           // vertical padding inside pill
 
-// Content layout
-const CONTENT_PADDING_TOP = 10;    // padding from viewport top to first pill
-const CONTENT_START_Y = VIEWPORT_TOP + CONTENT_PADDING_TOP;  // = 60
+// Menu items (3 pills × 60 + 2 gaps × 12 = 204px)
+const TOTAL_MENU_HEIGHT = 204;
 
-// Total content height
-// pill(72) + gap(16) + pill(72) + gap(16) + np(110) = 286
-const TOTAL_CONTENT_HEIGHT = 286;
+// Y positions (default scroll offset = 0)
+const QUEUE_Y = 50;                    // Queue pill: 50–110
+const PODCASTS_Y = 122;               // Podcasts pill: 122–182
+const SETTINGS_Y = 194;               // Settings pill: 194–254
 
 // Scroll
-const SCROLL_STEP = 80;           // pixels per swipe/button press
-const MAX_SCROLL = 0;             // 286 fits in 290, so no scroll needed!
+const SCROLL_STEP = 72;               // pixels per swipe (pill + gap)
+const MAX_SCROLL_3_ITEMS = 0;         // 204px fits in 220px — no scroll needed!
 
 // Title
-const TITLE_Y = 15;               // "YoCasts" title at top, outside viewport
+const TITLE_Y = 12;                    // "YoCasts" header
 const TITLE_FONT = Graphics.FONT_MEDIUM;  // 56px
 ```
 
-### 5.3 — Pill Y Positions (No-Scroll State)
+**Content positioning rationale:** 3 items at 204px total fit within the 220px scrollable viewport (Y=40 to Y=260) with 8px to spare. No scrolling needed for 3 items. When more items are added in future, scrolling activates automatically.
 
-Since total content (286px) fits within viewport (290px), scrolling is not needed for 3 items.
+#### 5.5.2 — Pill Positions & Width Calculations
 
-| Element | Content Y | Screen Y | Height | Width at Y |
-|---|---|---|---|---|
-| "YoCasts" title | — | 15 | 56 px | ~380 px (near-full) |
-| Queue pill | 0 | 60 | 72 px | see below |
-| Podcasts pill | 88 | 148 | 72 px | see below |
-| Now Playing pill | 176 | 236 | 110 px | see below |
-
-### 5.4 — Pill Width Calculation
-
-Each pill's width adapts to the round screen. The pill must fit within the circle at both its top and bottom Y positions:
+Each pill's width adapts to the round screen at its Y position. The constraining width is the **minimum circle width** across the pill's vertical span, minus margins.
 
 ```monkeyc
-function getPillWidth(pillScreenY as Number, pillHeight as Number) as Number {
-    // Find narrowest usable width across the pill's vertical span
-    var minWidth = 390;
-    // Check top edge, middle, and bottom edge
-    var widthTop = getWidthAtY(pillScreenY);
-    var widthMid = getWidthAtY(pillScreenY + pillHeight / 2);
-    var widthBot = getWidthAtY(pillScreenY + pillHeight);
-    minWidth = min3(widthTop, widthMid, widthBot);
-    // Apply side margin
-    return minWidth - (2 * PILL_SIDE_MARGIN);
-}
-```
-
-**Computed pill widths:**
-
-| Pill | Screen Y Range | Narrowest Screen Width | Pill Width (−60px margins) | X Start | X End |
-|---|---|---|---|---|---|
-| Queue | 60–132 | 281 px (at Y=60) | 221 px | 85 | 306 |
-| Podcasts | 148–220 | 374 px (at Y=148) | 314 px | 38 | 352 |
-| Now Playing | 236–346 | 253 px (at Y=346) | 193 px | 99 | 292 |
-
-**Wait — this shows a problem!** The Queue pill at Y=60 is severely constrained (221px), and the NP pill near the bottom is even worse (193px). This is why a center-weighted layout is critical.
-
-### 5.5 — REVISED Optimal Layout (Center-Weighted)
-
-To maximize usable width, we center the content vertically so pills are near Y=195:
-
-```
-Total content height = 286px
-Center content at Y=195 → start at Y = 195 - 286/2 = 52
-
-Queue:      Y=52  to Y=124  → narrowest width at Y=52: 265px
-Podcasts:   Y=140 to Y=212  → narrowest width at Y=140: 374px → at Y=212: 388px
-NP:         Y=228 to Y=338  → narrowest width at Y=338: 265px
-```
-
-Better, but the edges are still tight. **Revised approach: reduce vertical span.**
-
-```
-PILL_HEIGHT = 68;       // shave 4px
-NP_PILL_HEIGHT = 100;   // shave 10px
-PILL_GAP = 12;          // tighter gaps
-Total = 68 + 12 + 68 + 12 + 100 = 260px
-Center at 195 → start Y = 195 - 130 = 65
-
-Queue:      Y=65  to Y=133  → narrowest at Y=65 = 286px → pill width = 226px
-Podcasts:   Y=145 to Y=213  → narrowest at Y=145 = 261px → pill width = 201px... NO!
-```
-
-The narrowest at Y=145 is actually at Y=213: `2√(195²-18²) = 389px`. And at Y=145: `2√(195²-50²) = 377px`. So pill width = 377 - 60 = 317px. Let me recalculate properly.
-
-### 5.6 — FINAL Layout Spec (Verified)
-
-Centering the 260px content at screen center:
-
-| Pill | Y Start | Y End | Height | Width at Y_start¹ | Width at Y_end¹ | Min Width | Pill Width² | Pill X |
-|---|---|---|---|---|---|---|---|---|
-| Queue | 65 | 133 | 68 | 286 | 369 | 286 | 226 | 82 → 308 |
-| Podcasts | 145 | 213 | 68 | 377 | 389 | 377 | 317 | 37 → 354 |
-| Now Playing | 225 | 325 | 100 | 384 | 299 | 299 | 239 | 76 → 315 |
-
-¹ From geometry table: width = 2√(195² − (y−195)²)  
-² Pill width = min width − 60px (30px margin each side)
-
-**Simplified approach: Use a FIXED pill width based on the tightest constraint.**
-
-Rather than computing per-pill widths (which creates visual inconsistency), use a uniform approach:
-
-```
-FIXED_PILL_WIDTH = 280px
-PILL_X = (390 - 280) / 2 = 55
-```
-
-At Y=65: usable width = 286px. Pill at 280px fits with 3px margin per side (inside circle). ✓  
-At Y=325: usable width = 299px. Pill at 280px fits with 10px margin per side. ✓
-
-**But wait: at Y=65, the circle has width 286. Our pill is 280. The gap to the circle edge is only 3px per side.** The pill itself should have 30px visual margin from the circle's chord. So we need to ensure `pill_width + 2*margin ≤ usable_width`.
-
-At Y=65: 280 + 0 = 280 < 286 ✓ (tight but inside circle)  
-At Y=325: 280 + 0 = 280 < 299 ✓
-
-For visual breathing room, let's use variable-width pills that respect the curve:
-
-### 5.7 — DEFINITIVE Layout: Adaptive-Width Pills
-
-```monkeyc
-const PILL_H = 68;                  // Standard pill height
-const NP_H = 100;                   // Now Playing pill height
-const GAP = 12;                     // Gap between pills
-const PILL_MARGIN = 20;             // Margin from circle edge to pill edge
-const PILL_RADIUS = 18;             // Corner radius
-const PILL_INNER_PAD_X = 16;        // Horizontal padding inside pill
-const PILL_INNER_PAD_Y = 10;        // Vertical padding inside pill
-
-// Content starts 65px from top, centered vertically
-const FIRST_PILL_Y = 65;
-
-// Y positions
-const QUEUE_Y = 65;                 // Queue pill: 65–133
-const PODCASTS_Y = 145;             // Podcasts pill: 145–213
-const NP_Y = 225;                   // Now Playing pill: 225–325
-```
-
-**Per-pill adaptive width:**
-
-```monkeyc
-function drawPill(dc, y, height) {
-    // Find the narrowest circle width across this pill's span
+function getScrollPillWidth(pillY as Number) as Number {
     var minW = 390;
-    for (var scanY = y; scanY <= y + height; scanY += 5) {
-        var w = getWidthAtY(scanY);
+    for (var y = pillY; y <= pillY + PILL_HEIGHT; y += 5) {
+        var w = getWidthAtY(y);
         if (w < minW) { minW = w; }
     }
-    var pillW = minW - 2 * PILL_MARGIN;
-    var pillX = (390 - pillW) / 2;
-    dc.fillRoundedRectangle(pillX, y, pillW, height, PILL_RADIUS);
+    return minW - 2 * PILL_MARGIN;  // 20px margin each side
 }
 ```
 
-**Computed dimensions:**
+**Computed pill dimensions:**
 
-| Pill | Y Range | Limiting Y | Circle Width There | −40px Margins | Pill Width | Pill X |
+| Pill | Y Range | Constraining Y | Circle Width | −40px Margins | Pill Width | Pill X |
 |---|---|---|---|---|---|---|
-| Queue | 65–133 | 65 | 286 | 246 | **246** | 72 |
-| Podcasts | 145–213 | 145 | 377 | 337 | **337** | 27 |
-| Now Playing | 225–325 | 325 | 299 | 259 | **259** | 66 |
+| Queue | 50–110 | Y=50 | 261 px | 221 px | **221 px** | 85 |
+| Podcasts | 122–182 | Y=122 | 362 px | 322 px | **322 px** | 34 |
+| Settings | 194–254 | Y=254 | 372 px | 332 px | **332 px** | 29 |
 
-**This creates pills that gracefully follow the round screen curvature.** The widest pill is in the middle (Podcasts at 337px), and the edge pills (Queue, NP) are narrower to fit within the circle.
+**Width verification at constraining Y:**
+- Queue at Y=50: `2√(195² − 145²) = 2√17000 = 260.8` → 261 px ✓
+- Podcasts at Y=122: `2√(195² − 73²) = 2√32696 = 361.6` → 362 px ✓
+- Settings at Y=254: `2√(195² − 59²) = 2√34544 = 371.7` → 372 px ✓
 
-### 5.8 — Pill Internal Layout
+All pills end above Y=260 (Settings bottom = Y=254), so all items are fully visible with no scroll in the default state. ✓
 
-Each pill contains text and optional icon:
-
-#### Queue Pill (68px tall, ~246px wide)
+#### 5.5.3 — Queue Pill (Y=50–110, 221px wide)
 
 ```
-┌──────────────────────────────────┐  Y=65
-│ [♫]  Queue                       │  ← FONT_SMALL (46px), white
-│       5 episodes                 │  ← FONT_XTINY (33px), gray
-└──────────────────────────────────┘  Y=133
+        ╱                                  ╲
+       │  ┌─────────────────────────────┐   │  Y=50
+       │  │  [♫]  Queue                 │   │  ← FONT_SMALL (46px), white
+       │  │        3 episodes           │   │  ← FONT_XTINY (33px), gray
+       │  └─────────────────────────────┘   │  Y=110
+       │         221px wide                  │
 ```
 
-| Element | X Position | Y Position | Font | Color |
+| Element | Position | Font | Color | Notes |
 |---|---|---|---|---|
-| Music icon | pillX + 16 | 65 + 12 = 77 | Custom drawn | 0x55AAFF |
-| "Queue" | pillX + 48 | 65 + 11 = 76 | FONT_SMALL | White |
-| "5 episodes" | pillX + 48 | 65 + 11 + 28 = 104 | FONT_XTINY | 0xAAAAAA |
+| Music note icon | pillX + 16, Y=50+10 = 60 | Drawn (circle+stem) | 0x55AAFF | 20×24px |
+| "Queue" | pillX + 48, Y=50+8 = 58 | FONT_SMALL (46px) | 0xFFFFFF | Primary label |
+| "3 episodes" | pillX + 48, Y=50+34 = 84 | FONT_XTINY (33px) | 0xAAAAAA | Dynamic count |
+| Pill background | X=85, Y=50 | — | 0x1A1A2E | fillRoundedRect, r=16 |
 
-#### Podcasts Pill (68px tall, ~337px wide)
+**Text budget:** "Queue" in FONT_SMALL ≈ 5 chars × 19px = 95px. Available: 221 − 48 − 16 = 157px. ✓
+
+#### 5.5.4 — Podcasts Pill (Y=122–182, 322px wide)
 
 ```
-┌──────────────────────────────────────────────────┐  Y=145
-│ [🎧]  Podcasts                                    │  ← FONT_SMALL, white
-│        5 subscriptions                            │  ← FONT_XTINY, gray
-└──────────────────────────────────────────────────┘  Y=213
+       │  ┌──────────────────────────────────────┐  │  Y=122
+       │  │  [🎧]  Podcasts                       │  │  ← FONT_SMALL, white
+       │  │         5 subscriptions               │  │  ← FONT_XTINY, gray
+       │  └──────────────────────────────────────┘  │  Y=182
+       │              322px wide                     │
 ```
 
-| Element | X Position | Y Position | Font | Color |
+| Element | Position | Font | Color | Notes |
 |---|---|---|---|---|
-| Headphone icon | pillX + 16 | 145 + 12 = 157 | Custom drawn | 0x55AAFF |
-| "Podcasts" | pillX + 48 | 145 + 11 = 156 | FONT_SMALL | White |
-| "5 subscriptions" | pillX + 48 | 145 + 11 + 28 = 184 | FONT_XTINY | 0xAAAAAA |
+| Headphone icon | pillX + 16, Y=122+10 = 132 | Drawn (arc+cups) | 0x55AAFF | 22×20px |
+| "Podcasts" | pillX + 48, Y=122+8 = 130 | FONT_SMALL (46px) | 0xFFFFFF | Primary label |
+| "5 subscriptions" | pillX + 48, Y=122+34 = 156 | FONT_XTINY (33px) | 0xAAAAAA | Dynamic count |
+| Pill background | X=34, Y=122 | — | 0x1A1A2E | fillRoundedRect, r=16 |
 
-#### Now Playing Pill (100px tall, ~259px wide)
+#### 5.5.5 — Settings Pill (Y=194–254, 332px wide)
 
 ```
-┌────────────────────────────────────────┐  Y=225
-│  NOW PLAYING                           │  ← FONT_XTINY, accent blue
-│  Episode Title Goes Here...            │  ← FONT_SMALL, white (marquee if overflow)
-│  Podcast Name • 12:34 / 45:00    [▶]  │  ← FONT_XTINY, gray + play button
-│  ████████░░░░░░░░░░░░░░░░░░░░░░       │  ← progress bar
-└────────────────────────────────────────┘  Y=325
+       │  ┌──────────────────────────────────────┐  │  Y=194
+       │  │  [⚙]  Settings                       │  │  ← FONT_SMALL, white
+       │  │        Playback, downloads            │  │  ← FONT_XTINY, gray
+       │  └──────────────────────────────────────┘  │  Y=254
+       │              332px wide                     │
 ```
 
-| Element | X Position | Y Position | Font | Color |
+| Element | Position | Font | Color | Notes |
 |---|---|---|---|---|
-| "NOW PLAYING" | pillX + 16 | 225 + 8 = 233 | FONT_XTINY | 0x55AAFF |
-| Episode title | pillX + 16 | 233 + 22 = 255 | FONT_SMALL | White |
-| Podcast + time | pillX + 16 | 255 + 26 = 281 | FONT_XTINY | 0xAAAAAA |
-| Play/pause btn | pillX + pillW - 40 | 266 (center) | Drawn circle r=16 | 0x55AAFF |
-| Progress bar | pillX + 16 | 308 | — (2px rect) | 0x55AAFF / 0x333333 |
+| Gear icon | pillX + 16, Y=194+10 = 204 | Drawn (see §5.5.6) | 0x55AAFF | 22×22px |
+| "Settings" | pillX + 48, Y=194+8 = 202 | FONT_SMALL (46px) | 0xFFFFFF | Primary label |
+| "Playback, downloads" | pillX + 48, Y=194+34 = 228 | FONT_XTINY (33px) | 0xAAAAAA | Static hint |
+| Pill background | X=29, Y=194 | — | 0x1A1A2E | fillRoundedRect, r=16 |
 
-### 5.9 — Title Bar
+#### 5.5.6 — Gear Icon (⚙) Drawing Spec
+
+The gear icon is drawn with Graphics primitives — no Unicode or bitmap dependency.
+
+```monkeyc
+function drawGearIcon(dc as Dc, cx as Number, cy as Number) as Void {
+    var outerR = 11;
+    var innerR = 5;
+    var toothW = 4;
+    var toothH = 4;
+
+    // Gear body (filled circle)
+    dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+    dc.fillCircle(cx, cy, outerR);
+
+    // Center hole (background color)
+    dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);  // pill bg color
+    dc.fillCircle(cx, cy, innerR);
+
+    // 6 teeth at 0°, 60°, 120°, 180°, 240°, 300°
+    dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+    for (var i = 0; i < 6; i++) {
+        var angle = i * 60.0 * Math.PI / 180.0;
+        var tx = cx + (outerR * Math.cos(angle)).toNumber() - toothW / 2;
+        var ty = cy - (outerR * Math.sin(angle)).toNumber() - toothH / 2;
+        dc.fillRectangle(tx, ty, toothW, toothH);
+    }
+}
+```
+
+| Property | Value |
+|---|---|
+| Center | (pillX + 27, pillY + 21) |
+| Outer radius | 11 px |
+| Inner radius (hole) | 5 px |
+| Teeth | 6 rectangular teeth, 4×4 px each |
+| Color | 0x55AAFF (accent blue) |
+| Bounding box | ~26×26 px |
+
+#### 5.5.7 — Scrollable Zone Diagram
 
 ```
-"YoCasts" centered at Y=20, FONT_MEDIUM (56px), accent blue (0x55AAFF)
-Position: (195, 20), TEXT_JUSTIFY_CENTER
+Y=0    ·               (screen top — dead zone)
+       ·
+Y=12   ·     "YoCasts"  (FONT_MEDIUM, 0x55AAFF, centered)
+       ·
+Y=40   ┄┄┄┄┄  scroll viewport top  ┄┄┄┄┄
+
+Y=50   ┌──────────────────┐   Queue (221px)
+Y=110  └──────────────────┘
+                                     ↕ 12px gap
+Y=122  ┌────────────────────────┐   Podcasts (322px)
+Y=182  └────────────────────────┘
+                                     ↕ 12px gap
+Y=194  ┌─────────────────────────┐  Settings (332px)
+Y=254  └─────────────────────────┘
+
+Y=260  ══════════════════════════════  DOCK BOUNDARY (items clip here)
 ```
 
-This sits in the narrow top zone. At Y=20, usable width = 172px. "YoCasts" in FONT_MEDIUM ≈ 6 chars × 23px = ~138px. Fits comfortably.
+#### 5.5.8 — Scroll Behavior
 
-### 5.10 — Scroll Behavior
+| Property | Value | Notes |
+|---|---|---|
+| Scroll method | `onSwipe(SWIPE_UP/DOWN)` + `KEY_UP/DOWN` | Discrete steps |
+| Scroll step | 72 px | One pill + gap (60 + 12) |
+| Default scroll offset | 0 | All 3 items visible |
+| Max scroll (3 items) | 0 | Content (204px) fits in viewport (220px) |
+| Max scroll (N items) | `max(0, N*72 - 12 - 220)` | For future items |
+| Scroll animation | None (instant snap) | Garmin CPU limitation |
+| Boundary clamping | `scrollOffset = clamp(scrollOffset, 0, maxScroll)` | No overscroll |
 
-With the revised layout (260px content in 290px viewport), **no scrolling is needed for the home menu**. All three pills are visible at once. This eliminates an entire class of bugs (scroll offset, hit-test adjustment, viewport clipping).
+**Future-proofing:** When more menu items are added (e.g., History, Discover), scrolling activates automatically. The 4th item at Y=266 would be partially hidden behind the dock, requiring one scroll step to reveal.
 
-If a "Now Playing" section grows (e.g., longer progress display), scrolling can be added with:
-- Viewport: Y=50 to Y=340 (290px)
-- Scroll step: 80px per swipe
-- Content drawn at `screenY = contentY - scrollOffset`
-- `dc.setClip(0, 50, 390, 290)` for viewport clipping
+#### 5.5.9 — Clipping at Dock Boundary
+
+Items that scroll into the dock zone are hidden by clipping:
+
+```monkeyc
+// Before drawing scrollable items:
+dc.setClip(0, 0, 390, DOCK_TOP);  // only draw above Y=260
+
+// Draw each pill at its Y position (adjusted for scroll offset)
+for (var i = 0; i < menuItems.size(); i++) {
+    var itemY = QUEUE_Y + i * (PILL_HEIGHT + PILL_GAP) - scrollOffset;
+    if (itemY + PILL_HEIGHT > 0 && itemY < DOCK_TOP) {
+        drawPill(dc, itemY, menuItems[i]);
+    }
+}
+
+// Clear clip before drawing dock
+dc.clearClip();
+// ... draw dock on top ...
+```
+
+Items partially within the clip boundary are automatically cropped — no manual calculation needed. This creates the "scroll under the dock" visual effect.
+
+### 5.6 — Title Bar
+
+```
+"YoCasts" centered at Y=12, FONT_MEDIUM (56px), accent blue (0x55AAFF)
+Position: (195, 12), TEXT_JUSTIFY_CENTER
+```
+
+At Y=12, usable width = ~140px. "YoCasts" in FONT_MEDIUM ≈ 6 chars × 23px = ~138px. Tight fit but legible. The title is in the top dead zone, consistent with Garmin system app headers.
+
+### 5.7 — Settings Page Spec
+
+Navigated to from the Settings pill on the home menu. Uses `WatchUi.Menu2` for standard list behavior.
+
+#### 5.7.1 — Settings Menu Items
+
+| Item | Label | Sub-Label | Action | Status |
+|---|---|---|---|---|
+| Playback Speed | "Playback Speed" | "1.0x" (current value) | Future: cycle 0.5–3.0x | Placeholder |
+| Auto-Download | "Auto-Download" | "Off" | Future: toggle on/off | Placeholder |
+| Stream Quality | "Stream Quality" | "Standard" | Future: Low/Standard/High | Placeholder |
+| Clear Cache | "Clear Cache" | "2.1 MB used" | Clears Application.Storage | Placeholder |
+| About | "About" | "YoCasts v1.0" | Shows version info | Active |
+
+#### 5.7.2 — Settings Page Layout
+
+```monkeyc
+// Settings uses Menu2 — Garmin handles all layout, scrolling, and round adaptation
+var menu = new WatchUi.Menu2({:title => "Settings"});
+menu.addItem(new WatchUi.MenuItem("Playback Speed", "1.0x", :playbackSpeed, {}));
+menu.addItem(new WatchUi.MenuItem("Auto-Download", "Off", :autoDownload, {}));
+menu.addItem(new WatchUi.MenuItem("Stream Quality", "Standard", :streamQuality, {}));
+menu.addItem(new WatchUi.MenuItem("Clear Cache", "2.1 MB", :clearCache, {}));
+menu.addItem(new WatchUi.MenuItem("About", "YoCasts v1.0", :about, {}));
+WatchUi.pushView(menu, new SettingsDelegate(), WatchUi.SLIDE_LEFT);
+```
+
+#### 5.7.3 — Settings Navigation
+
+- **Entry:** Tap Settings pill on home menu → `pushView` with `SLIDE_LEFT`
+- **Back:** Swipe right or KEY_ESC → `popView` with `SLIDE_RIGHT`
+- **Item action:** Tap or SELECT → item-specific handler (placeholder toast for v1)
+
+### 5.8 — Complete Draw Order
+
+The home screen `onUpdate(dc)` must draw in this exact order:
+
+```
+1. Clear screen (black)
+2. Draw "YoCasts" title at Y=12
+3. Set clip to (0, 0, 390, 260)       ← scrollable zone only
+4. Draw menu pills (Queue, Podcasts, Settings) adjusted for scroll offset
+5. Clear clip
+6. Draw dock background (solid black, Y=260–390)
+7. Draw dock divider line (Y=260, 1px, 0x333333)
+8. Draw podcast name (Y=268)
+9. Draw episode title (Y=302)
+10. Draw progress bar (Y=338)
+11. Draw time display (Y=346)
+12. Draw play/pause icon (Y=378)
+```
 
 ---
 
@@ -842,8 +1179,9 @@ At key Y positions on the Now Playing screen:
 | Custom scroll behavior | | ✓ |
 
 **YoCasts approach:**
-- Home menu → Custom View (needs rich NP pill, adaptive pills)
+- Home menu → Custom View with **split-dock layout** (scrollable pills + fixed NP dock overlay)
 - Queue / Podcasts / Episodes → Menu2 (standard list, Garmin handles layout)
+- Settings → Menu2 (standard list with placeholder items)
 - Now Playing → Custom View (fully custom layout)
 
 ---
@@ -851,11 +1189,17 @@ At key Y positions on the Now Playing screen:
 ## Appendix A — Quick Reference Card
 
 ```
-SCREEN: 390×390 round, center (195,195), radius 195
-FONTS:  XTINY=33  TINY=41  SMALL=46  MEDIUM=56  LARGE=61
-COLORS: bg=000000  text=FFFFFF  sub=AAAAAA  accent=55AAFF  pill=1A1A2E
-TOUCH:  Min 56px tall targets. Use InputDelegate for custom views.
-PILLS:  68px Queue/Podcasts, 100px NP. 12px gaps. Adaptive width.
-VIEWPORT: Y=50 to Y=340 (290px). No scroll needed for 3 pills.
-SAFE ZONE: Y=55 to Y=335 (≥268px wide everywhere)
+SCREEN:     390×390 round, center (195,195), radius 195
+FONTS:      XTINY=33  TINY=41  SMALL=46  MEDIUM=56  LARGE=61
+COLORS:     bg=000000  text=FFFFFF  sub=AAAAAA  accent=55AAFF  pill=1A1A2E
+TOUCH:      Min 56px tall targets. Use InputDelegate for custom views.
+
+HOME SCREEN (Split-Dock):
+  SCROLL ZONE:  Y=0 to Y=260 (menu pills scroll here)
+  DOCK ZONE:    Y=260 to Y=390 (fixed Now Playing overlay)
+  PILLS:        60px tall, 12px gaps. Queue(Y=50), Podcasts(Y=122), Settings(Y=194)
+  DOCK:         Podcast(Y=268), Episode(Y=302), Progress(Y=338), Time(Y=346)
+  PLAY/PAUSE:   Touch zone Y=365–390 (dead zone, intentional)
+  DOCK TAP:     Y=260–365 → NP screen, Y=365–390 → toggle playback
+  CLIP:         dc.setClip(0,0,390,260) for scrollable; dock draws on top
 ```

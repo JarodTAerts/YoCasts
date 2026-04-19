@@ -1,7 +1,6 @@
 project.manifest = manifest.xml
 
-# Source and resource paths (explicit to ensure settings are discovered)
-base.sourcePath = source;source/views;source/services;source/models;source/media
-base.resourcePath = resources;resources/drawables;resources/strings;resources/settings
-
-# Target only Garmin Venu 4 41mm (390x390 AMOLED, touch + 2 buttons)
+# Device build — audio-content-provider-app type with media stubs
+# Uses source/app/ for AudioContentProviderApp entry point
+base.sourcePath = source/app;source/views;source/services;source/models;source/media
+base.resourcePath = resources
