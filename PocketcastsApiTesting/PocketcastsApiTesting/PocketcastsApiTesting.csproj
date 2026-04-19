@@ -19,4 +19,12 @@
     </None>
   </ItemGroup>
 
+  <!-- Legacy Tizen-era files kept for reference only — exclude from compilation -->
+  <ItemGroup>
+    <Compile Remove="PocketCastsApiService.cs" />
+    <Compile Remove="PocketCastsApiAccessorcs.cs" />
+    <Compile Remove="AuthResponse.cs" />
+    <Compile Remove="Podcast.cs" />
+  </ItemGroup>
+
 </Project>

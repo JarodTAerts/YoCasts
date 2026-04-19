@@ -139,6 +139,7 @@ while (true)
     Console.WriteLine("  14. Get categories");
     Console.WriteLine("  15. Test error handling");
     Console.WriteLine("  16. 🔊 Audio download research probe");
+    Console.WriteLine("  17. 🔐 Audio URL auth validation (Phase C prep)");
     Console.WriteLine("  0.  Exit");
     Console.WriteLine();
     Console.Write("  > ");
@@ -235,6 +236,11 @@ while (true)
 
         case "16":
             await AudioProbeRunner.RunAudioProbes(client, resultsDir);
+            break;
+
+        case "17":
+            var validator = new AudioAuthValidator(client, resultsDir);
+            await validator.RunValidation();
             break;
 
         default:

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
@@ -17,12 +18,22 @@ namespace YoCastsProxy;
 ///
 /// GET /api/pocketcasts/episode/{uuid}/audio-info
 /// Requires Bearer token (used to fetch episode metadata from PocketCasts).
-/// Returns: { audioUrl, fileSize, contentType, duration, title, podcastUuid }
+/// Returns: { audioUrl, fileSize, contentType, duration, title, podcastTitle, podcastUuid, requiresAuth }
+///
+/// Caching: Results cached in-memory for 2 hours (audio URLs are stable for hours/days).
+/// SupportingCast premium URLs with embedded JWT are cached for only 30 minutes
+/// and flagged with requiresAuth=true so the client knows to re-fetch before download.
 /// </summary>
 public class AudioInfoProxy
 {
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<AudioInfoProxy> _logger;
+
+    // In-memory cache: survives across requests within the same Azure Function instance.
+    // Standard episodes: 2 hour TTL. SupportingCast (JWT): 30 minute TTL.
+    private static readonly ConcurrentDictionary<string, AudioInfoCacheEntry> _cache = new();
+    private static readonly TimeSpan StandardCacheTtl = TimeSpan.FromHours(2);
+    private static readonly TimeSpan PremiumCacheTtl = TimeSpan.FromMinutes(30);
 
     public AudioInfoProxy(IHttpClientFactory httpClientFactory, ILogger<AudioInfoProxy> logger)
     {
@@ -47,6 +58,13 @@ public class AudioInfoProxy
             };
         }
         var token = authHeader["Bearer ".Length..];
+
+        // Check cache first
+        if (_cache.TryGetValue(uuid, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
+        {
+            _logger.LogInformation("AudioInfo: cache hit for {Uuid}", uuid);
+            return new OkObjectResult(cached.Response);
+        }
 
         // Step 1: Fetch episode metadata from PocketCasts to get the audio URL
         var pocketCastsClient = _httpClientFactory.CreateClient("PocketCasts");
@@ -99,6 +117,8 @@ public class AudioInfoProxy
             ? titleProp.GetString() : "";
         var podcastUuid = episodeData.TryGetProperty("podcastUuid", out var podProp)
             ? podProp.GetString() : "";
+        var podcastTitle = episodeData.TryGetProperty("podcastTitle", out var ptProp)
+            ? ptProp.GetString() : "";
         var fileType = episodeData.TryGetProperty("fileType", out var ftProp)
             ? ftProp.GetString() : "";
 
@@ -110,8 +130,12 @@ public class AudioInfoProxy
             };
         }
 
-        // Step 2: HEAD request to the audio URL to get real file size
-        // Audio URLs are public CDN links — no auth needed.
+        // Detect SupportingCast premium URLs with embedded JWT tokens.
+        // These URLs have time-limited tokens and should be re-fetched before download.
+        var requiresAuth = IsPremiumUrl(audioUrl);
+
+        // Step 2: HEAD request to the audio URL to get real file size.
+        // Audio URLs are public CDN links — no Bearer token needed.
         // The HEAD client follows redirects automatically.
         long fileSize = 0;
         string contentType = fileType ?? "audio/mpeg";
@@ -119,7 +143,7 @@ public class AudioInfoProxy
 
         try
         {
-            using var headClient = _httpClientFactory.CreateClient("AudioHead");
+            var headClient = _httpClientFactory.CreateClient("AudioHead");
             var headRequest = new HttpRequestMessage(HttpMethod.Head, audioUrl);
             var headResponse = await headClient.SendAsync(headRequest);
 
@@ -154,18 +178,46 @@ public class AudioInfoProxy
 
         var result = new
         {
+            uuid,
             audioUrl = finalUrl,
             fileSize,
-            contentType,
             duration,
+            contentType,
+            requiresAuth,
             title,
-            podcastUuid,
-            episodeUuid = uuid
+            podcastTitle,
+            podcastUuid
         };
 
-        _logger.LogInformation("AudioInfo: {Uuid} → {FileSize} bytes, {ContentType}",
-            uuid, fileSize, contentType);
+        // Cache the result
+        var ttl = requiresAuth ? PremiumCacheTtl : StandardCacheTtl;
+        _cache[uuid] = new AudioInfoCacheEntry(result, DateTime.UtcNow + ttl);
+
+        // Evict expired entries periodically (simple inline eviction)
+        if (_cache.Count > 200)
+        {
+            foreach (var key in _cache.Keys)
+            {
+                if (_cache.TryGetValue(key, out var entry) && entry.ExpiresAt < DateTime.UtcNow)
+                    _cache.TryRemove(key, out _);
+            }
+        }
+
+        _logger.LogInformation("AudioInfo: {Uuid} → {FileSize} bytes, {ContentType}, requiresAuth={RequiresAuth}",
+            uuid, fileSize, contentType, requiresAuth);
 
         return new OkObjectResult(result);
     }
+
+    /// <summary>
+    /// Detects SupportingCast premium URLs that embed JWT tokens with timestamps.
+    /// These URLs expire and should be re-fetched before each download.
+    /// </summary>
+    private static bool IsPremiumUrl(string url)
+    {
+        return url.Contains("supportingcast.fm/content/", StringComparison.OrdinalIgnoreCase) ||
+               (url.Contains("|") && url.Contains("supportingcast", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private record AudioInfoCacheEntry(object Response, DateTime ExpiresAt);
 }
