@@ -446,8 +446,9 @@ class DownloadsDelegate extends WatchUi.InputDelegate {
         var idx = _view.getSelectedIndex();
         if (idx >= 0 && idx < downloads.size()) {
             var dl = downloads[idx] as Dictionary;
-            var title = dl[DownloadQueue.DL_TITLE] as String;
-            DownloadQueue.removeFromQueue(dl[DownloadQueue.DL_UUID] as String);
+            var uuid = dl[DownloadQueue.DL_UUID] as String;
+            DownloadQueue.removeFromQueue(uuid);
+            StorageManager.removeDownload(uuid);
 
             // Adjust selection if needed
             var newDownloads = DownloadQueue.getDownloads();
