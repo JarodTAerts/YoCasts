@@ -1213,3 +1213,25 @@ https://yocasts-proxy.azurewebsites.net/api/pocketcasts/{*path}
 
 1. **Kaylee:** Does `makeImageRequest()` support WebP on Venu 4 SDK 9.1.0? If not, proxy may need PNG conversion endpoint.
 2. **Team:** Should we implement in-memory OR Table Storage caching for v1? Current choice: in-memory (simpler, cold start trade-off acceptable).
+
+---
+
+## PowerShell Deploy Script: deploy-sim.ps1 Conversion (2026-04-19)
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-04-19  
+**Affects:** Jarod Aerts, all agents running builds
+
+### Decision
+
+Created `YoCastsGarmin/deploy-sim.ps1` — a PowerShell rewrite of `deploy-sim.bat` with automatic simulator launch.
+
+### Key Changes
+
+1. **Auto-start simulator** — Checks for running `simulator` process; launches `simulator.exe` from SDK bin with 5s init wait if absent. No more "is the simulator running?" failures.
+2. **Idiomatic PowerShell** — Uses `$ErrorActionPreference`, `$LASTEXITCODE`, `Write-Host` with colors, `Start-Process` for the simulator.
+3. **Old .bat preserved** — `deploy-sim.bat` still works if anyone prefers it.
+
+### Recommendation
+
+Use `.\deploy-sim.ps1` as the default build+deploy command going forward. Update any docs referencing `deploy-sim.bat` to mention both options.
