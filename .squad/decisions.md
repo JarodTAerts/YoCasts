@@ -231,6 +231,217 @@ Connect IQ `sourcePath` is recursive. Both jungle files define separate entry po
 
 ---
 
+### Phase C Readiness Assessment (2026-04-16)
+
+**By:** Mal (Lead)  
+**Affects:** Kaylee (Garmin Dev), Wash (API Dev), Jarod Aerts  
+**Status:** Active
+
+Phase C (audio download via SyncDelegate) is architecturally unblocked but has two prerequisites before implementation:
+
+1. **Phase B (Sync Engine) must complete** — SyncEngine class needs to push/pull/reconcile successfully. ✅ **COMPLETE** (Kaylee)
+2. **`Background` permission must be added to manifest.xml** — one-line change, blocking for SyncDelegate background execution.
+
+**Phase C Gate — Current Status:**
+- ChangeLog works ✅
+- DownloadQueue works ✅
+- ConnectivityManager works ✅
+- SyncEngine pushes and pulls ✅
+- Audio URL auth validated ✅ (Wash confirmed no auth needed)
+- Venu 4 hardware available ❓ (needed)
+
+**Top Risks (ordered by severity):**
+1. **64 KB SyncDelegate memory limit** — only 15-24 KB usable. Mitigation: minimal imports, direct Storage reads.
+2. **`HTTP_RESPONSE_CONTENT_TYPE_AUDIO` behavior** — only verified in MonkeyMusic sample. Must test on hardware immediately.
+3. **CDN redirect chain handling** — all audio URLs redirect 1-6 times. Unknown if Garmin follows automatically.
+4. **Interrupted download handling** — no resume in v1, partial downloads restart from scratch.
+5. **Per-app storage quota** — unknown exact limit on Venu 4.
+
+**Action Items:**
+- [ ] Kaylee: Add `<iq:uses-permission id="Background"/>` to manifest.xml
+- [ ] Kaylee: Resolve CacheManager API gap (addChangelogEntry/savePosition live in separate modules vs implementation plan)
+- [ ] Jarod: Acquire/prepare Venu 4 hardware for Phase C testing
+- [ ] All: Review `docs/hardware-testing-plan.md` for testing protocol
+
+**Documents:**
+- `docs/phase-c-readiness.md` — full codebase audit + risk assessment
+- `docs/hardware-testing-plan.md` — 40+ test cases, 5-day execution plan
+
+---
+
+### Brand Color Tinting in All List Views (2026-04-19)
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-04-19  
+**Affects:** Wash (API Dev), Mal (Lead)  
+**Status:** Complete
+
+Implemented per-item brand color tinting in all three list views (Podcasts, Queue, Episodes) using `CustomMenuItem` with `artColor`/`artTint` from the proxy.
+
+**Design Choices:**
+1. **CustomMenuItem for all lists** — Podcasts, Queue, and Episodes now use custom-drawn menu items instead of plain `MenuItem`. Full control over background, text, and indicator rendering.
+
+2. **Color lookup pattern** — `DataFormat.lookupPodcastColors(podcasts, podcastUuid)` resolves colors by UUID from the subscribed podcast cache. Queue episodes look up their parent podcast's colors. Episode list items inherit the parent podcast's colors uniformly.
+
+3. **Contrast safety** — `DataFormat.ensureContrast(fg, bg)` checks luminance difference. If text would be unreadable (diff < 0.25), it falls back to white (on dark bg) or black (on light bg).
+
+4. **Dim factors per context:**
+   - Podcast list: 20% unfocused, 35% focused
+   - Queue: 15% unfocused, 30% focused (subtler since queue has mixed podcasts)
+   - Episode list: 10% unfocused, 22% focused (subtlest — single podcast context)
+
+5. **Zero memory cost** — Colors are integer values. No bitmaps, no additional storage.
+
+**Implications:**
+- **Wash:** Proxy must continue serving `artColor` and `artTint` as hex strings or pre-parsed integers per podcast in `/user/podcast/list`.
+- **Mal:** CustomMenuItem is now the standard pattern for all branded list UIs. Future screens should follow the same pattern.
+
+---
+
+### Phase A Changelog + Position Tracking Implementation (2026-07-16)
+
+**By:** Kaylee (Garmin Dev)  
+**Affects:** Wash (API Dev), Mal (Lead)  
+**Status:** Complete
+
+Enhanced `ChangeLog.mc` and created `PositionTracker.mc` as the foundation for Phase B sync engine.
+
+**Key Design Decisions:**
+
+1. **Enhanced existing ChangeLog module** — Added convenience methods (`logPositionUpdate`, `logStatusChange`, `logQueueAction`, `getChangelog`, `clearChangelog`) on top of existing `addEntry` API.
+
+2. **PositionTracker is a class, not a module** — Timer callbacks require `method(:symbol)` which needs class instance context (`self`). Modules can't provide this.
+
+3. **Dual-write pattern** — PositionTracker writes to both ChangeLog (for eventual sync push) and CacheManager (for instant offline resume).
+
+4. **Reduced MAX_ENTRIES from 100 to 50** — Design doc's 8 KB budget. With coalescing, 50 entries sufficient for typical session.
+
+5. **Battery-adaptive intervals** — 15s normal, 30s when battery < 20%. Checked via `System.getSystemStats().battery`.
+
+**Files Changed:**
+- `YoCastsGarmin/source/services/ChangeLog.mc` — Enhanced with convenience API + new types
+- `YoCastsGarmin/source/services/PositionTracker.mc` — **NEW** — Timer-based position logger
+- `YoCastsGarmin/source/views/NowPlayingView.mc` — Integrated PositionTracker lifecycle
+
+**For Wash (Phase B):** Sync engine should call `ChangeLog.getChangelog()` and `ChangeLog.clearChangelog()` only after confirmed server push.
+
+---
+
+### SyncEngine Architecture (Phase B) (2026-07-18)
+
+**By:** Kaylee (Garmin Dev)  
+**Affects:** Mal (Lead), Wash (API Dev), Zoe (Testing)  
+**Status:** Complete
+
+Implemented the 7-step sync engine as a **class** (not module) in `source/services/SyncEngine.mc`.
+
+**Key Decisions:**
+
+1. **Class, not module:** SyncEngine must be a class because `method(:callback)` for async `makeWebRequest` requires a class instance context.
+
+2. **Own auth flow:** SyncEngine manages its own login/token independently of PocketCastsPodcastService. Reads same credentials from `Application.Properties`.
+
+3. **Changelog snapshot at step 2:** Solves the race condition flagged by Zoe. Snapshot entry IDs tracked in a Dictionary set. Cleanup selectively removes only snapshot entries — new entries added by PositionTracker during sync are preserved.
+
+4. **Hybrid server fetch:** Uses `/user/in_progress` bulk endpoint first (covers ~95% of cases in 1 request), then individual `/user/episode` only for changelog episodes not found in bulk response.
+
+5. **Aggregation before reconciliation:** Multiple changelog entries per episode (e.g., POSITION_UPDATE + EPISODE_COMPLETED) are aggregated to a single local state using `max(position)`, `max(status)`, `max(duration)`.
+
+6. **Partial push success:** If some pushes fail and others succeed, only entries for successfully-pushed episodes are cleared. Failed episodes' changelog entries preserved for next sync cycle.
+
+7. **Refresh via service.fetchAll():** Step 6 triggers the existing service pipeline rather than doing its own cache refresh.
+
+**Files Changed:**
+- **Created:** `YoCastsGarmin/source/services/SyncEngine.mc`
+- **Modified:** `YoCastsGarmin/source/app/YoCastsApp.mc` (lifecycle integration)
+
+**Open Questions:**
+- Should sync display a UI indicator ("Syncing..." toast)? Currently logs to console.
+- Should we add a manual "Sync Now" action in the settings menu?
+- The `/user/in_progress` response format needs verification with live API testing (Wash).
+
+---
+
+### Audio URL Auth Confirmed + AudioInfo Proxy Enhanced (2026-04-19)
+
+**By:** Wash (API Dev)  
+**Affects:** Kaylee (Garmin Dev), Mal (Lead)  
+**Status:** Complete
+
+**Audio URL Auth Validation — DEFINITIVELY CONFIRMED**
+
+Live testing on 5 episodes from 5 podcasts across 4 CDNs:
+
+| Podcast | CDN | Auth Required? | Range Support? | File Size |
+|---------|-----|:-:|:-:|-----------|
+| The Vergecast: Ad-Free | supportingcast.fm | NO | YES (206) | 69.6 MB |
+| The Vergecast | megaphone.fm | NO | YES (206) | 84.9 MB |
+| Acquired | transistor.fm | NO | YES (206) | 242.5 MB |
+| Timesuck | simplecastaudio.com | NO | YES (206) | 102.2 MB |
+| 99% Invisible | simplecastaudio.com | NO | YES (206) | 30.4 MB |
+
+**Conclusion:** Garmin SyncDelegate can download audio directly from CDN URLs. No PocketCasts auth headers needed. All CDNs support Range (resumable).
+
+**AudioInfo Proxy Endpoint — Enhanced & Deployed**
+
+**Endpoint:** `GET https://yocasts-proxy-personal.azurewebsites.net/api/pocketcasts/episode/{uuid}/audio-info`
+
+**Response shape:**
+```json
+{
+  "uuid": "episode-uuid",
+  "audioUrl": "https://cdn.example.com/episode.mp3",
+  "fileSize": 88844501,
+  "duration": 5428,
+  "contentType": "audio/mpeg",
+  "requiresAuth": false,
+  "title": "Episode Title",
+  "podcastTitle": "Podcast Name",
+  "podcastUuid": "podcast-uuid"
+}
+```
+
+**Enhancements:**
+1. `requiresAuth` field — flags SupportingCast premium URLs so Garmin client can re-fetch before download
+2. `podcastTitle` field — from episode metadata
+3. In-memory caching — 2hr TTL for standard, 30min for premium URLs
+4. SupportingCast detection via `IsPremiumUrl()` pattern matching
+5. Response ~515 bytes typical — well under 2 KB Garmin per-value limit
+
+**For Kaylee:** SyncDelegate should call this endpoint before each download to get audioUrl, fileSize, requiresAuth, and contentType.
+
+---
+
+### Sync Engine Test Plan Published (2026-04-14)
+
+**By:** Zoe (Tester)  
+**Affects:** Kaylee (Garmin Dev), Mal (Lead), Wash (API Dev)  
+**Document:** `docs/test-plan-sync-engine.md`  
+**Status:** Complete
+
+Published comprehensive test plan covering Phase A (Changelog + Position Tracker) and Phase B (Sync Engine) with 48 structured test scenarios:
+- 18 ChangeLog tests (CL-01 through CL-18)
+- 10 PositionTracker tests (PT-01 through PT-10)
+- 14 SyncEngine tests (SE-01 through SE-14)
+- 6 Cross-Cutting tests (CC-01 through CC-06)
+
+**Key Decisions:**
+
+1. **Tests written against spec, not implementation** — Position tracker and sync engine weren't built yet at test time. Test IDs and expected values may need revision once Kaylee's implementation is final.
+
+2. **MAX_ENTRIES = 100** — Task brief mentioned 50, but `ChangeLog.mc` and design spec both say 100. Tests use 100.
+
+3. **Input validation deferred to sync layer** — Recommend `addEntry()` does NOT validate inputs (empty UUIDs, negative positions). Keep logging fast. Validation happens at reconciliation time. ✅ Kaylee implemented this pattern.
+
+4. **Concurrent modification flagged as risk** — `addEntry()` does a read-modify-write. If position tracker timer fires during sync engine `clearEntries()`, entries could be lost. ✅ Kaylee fixed via changelog snapshot pattern.
+
+**Test Breakdown:**
+- Phase A tests (18 of 18) run fully in the simulator
+- Phase B tests need mocked API responses
+- Cross-cutting tests (BT disconnect, Wi-Fi fallback, memory pressure, app kill) require hardware
+
+---
+
 ## Governance
 
 - All meaningful changes require team consensus
