@@ -209,7 +209,7 @@ class EpisodeMenuItem extends WatchUi.CustomMenuItem {
 
     function initialize(id as String, title as String, subtitle as String,
                         status as Number, brandColor as Number, tintColor as Number) {
-        CustomMenuItem.initialize(id, {});
+        CustomMenuItem.initialize(id, {:height => 80});
         setLabel(title);
         _title = title;
         _subtitle = subtitle;
@@ -219,27 +219,29 @@ class EpisodeMenuItem extends WatchUi.CustomMenuItem {
     }
 
     function draw(dc as Graphics.Dc) as Void {
+        System.println("YoCasts: EpisodeMenuItem.draw() called — " + _title);
         var w = dc.getWidth();
         var h = dc.getHeight();
 
-        // Subtle brand color background — slightly brighter when focused
-        var factor = isFocused() ? 0.22 : 0.10;
-        var bgColor = DataFormat.dimColor(_brandColor, factor);
+        // Brightened brand color for visible background tint
+        var boosted = DataFormat.brightenColor(_brandColor, 80);
+        var factor = isFocused() ? 0.50 : 0.25;
+        var bgColor = DataFormat.dimColor(boosted, factor);
         dc.setColor(Graphics.COLOR_WHITE, bgColor);
         dc.clear();
 
-        // Status indicator dot on the left
+        // Status indicator dot on the left (boosted for visibility)
         var dotCX = 12;
         var dotCY = h / 2;
         if (_status == DataKeys.STATUS_IN_PROGRESS) {
-            dc.setColor(_brandColor, Graphics.COLOR_TRANSPARENT);
+            dc.setColor(DataFormat.brightenColor(_brandColor, 160), Graphics.COLOR_TRANSPARENT);
             dc.fillCircle(dotCX, dotCY, 4);
         } else if (_status == DataKeys.STATUS_NOT_PLAYED) {
             dc.setColor(_tintColor, Graphics.COLOR_TRANSPARENT);
             dc.fillCircle(dotCX, dotCY, 4);
         } else {
             // Completed — dim ring
-            dc.setColor(DataFormat.dimColor(_brandColor, 0.5), Graphics.COLOR_TRANSPARENT);
+            dc.setColor(DataFormat.brightenColor(_brandColor, 100), Graphics.COLOR_TRANSPARENT);
             dc.setPenWidth(1);
             dc.drawArc(dotCX, dotCY, 4, Graphics.ARC_CLOCKWISE, 0, 360);
         }

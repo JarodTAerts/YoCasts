@@ -102,6 +102,28 @@ module DataFormat {
         return (r << 16) | (g << 8) | b;
     }
 
+    //! Scale a color so its brightest channel reaches targetMax (0-255).
+    //! Preserves hue while ensuring the color is actually visible on
+    //! AMOLED screens — crucial for very dark artColor values like #1d2b38.
+    function brightenColor(color as Number, targetMax as Number) as Number {
+        var r = (color >> 16) & 0xFF;
+        var g = (color >> 8) & 0xFF;
+        var b = color & 0xFF;
+        var maxC = r;
+        if (g > maxC) { maxC = g; }
+        if (b > maxC) { maxC = b; }
+        if (maxC == 0) { return 0x333333; }
+        if (maxC >= targetMax) { return color; }
+        var scale = targetMax.toFloat() / maxC.toFloat();
+        r = (r.toFloat() * scale).toNumber();
+        g = (g.toFloat() * scale).toNumber();
+        b = (b.toFloat() * scale).toNumber();
+        if (r > 255) { r = 255; }
+        if (g > 255) { g = 255; }
+        if (b > 255) { b = 255; }
+        return (r << 16) | (g << 8) | b;
+    }
+
     //! Calculate perceived luminance of a color (0.0 = dark, 1.0 = bright)
     function luminance(color as Number) as Float {
         var r = ((color >> 16) & 0xFF).toFloat() / 255.0;

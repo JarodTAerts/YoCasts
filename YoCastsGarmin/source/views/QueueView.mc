@@ -106,7 +106,7 @@ class QueueEpisodeMenuItem extends WatchUi.CustomMenuItem {
 
     function initialize(id as String, title as String, subtitle as String,
                         brandColor as Number, tintColor as Number) {
-        CustomMenuItem.initialize(id, {});
+        CustomMenuItem.initialize(id, {:height => 80});
         setLabel(title);
         _title = title;
         _subtitle = subtitle;
@@ -115,17 +115,20 @@ class QueueEpisodeMenuItem extends WatchUi.CustomMenuItem {
     }
 
     function draw(dc as Graphics.Dc) as Void {
+        System.println("YoCasts: QueueEpisodeMenuItem.draw() called — " + _title);
         var w = dc.getWidth();
         var h = dc.getHeight();
 
-        // Dimmed brand color background — brighter when focused
-        var factor = isFocused() ? 0.30 : 0.15;
-        var bgColor = DataFormat.dimColor(_brandColor, factor);
+        // Brightened brand color for visible background tint
+        var boosted = DataFormat.brightenColor(_brandColor, 80);
+        var factor = isFocused() ? 0.55 : 0.30;
+        var bgColor = DataFormat.dimColor(boosted, factor);
         dc.setColor(Graphics.COLOR_WHITE, bgColor);
         dc.clear();
 
-        // Accent bar on left edge
-        dc.setColor(_brandColor, Graphics.COLOR_TRANSPARENT);
+        // Accent bar on left edge (boosted for visibility)
+        var barColor = DataFormat.brightenColor(_brandColor, 160);
+        dc.setColor(barColor, Graphics.COLOR_TRANSPARENT);
         dc.fillRectangle(0, 0, 4, h);
 
         // Title and subtitle layout

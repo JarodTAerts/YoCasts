@@ -85,7 +85,7 @@ class PodcastMenuItem extends WatchUi.CustomMenuItem {
     private var _tintColor as Number;
 
     function initialize(id as String, title as String, author as String, brandColor as Number, tintColor as Number) {
-        CustomMenuItem.initialize(id, {});
+        CustomMenuItem.initialize(id, {:height => 80});
         setLabel(title);
         _title = title;
         _author = author;
@@ -94,19 +94,23 @@ class PodcastMenuItem extends WatchUi.CustomMenuItem {
     }
 
     function draw(dc as Graphics.Dc) as Void {
+        System.println("YoCasts: PodcastMenuItem.draw() called — " + _title);
         var w = dc.getWidth();
         var h = dc.getHeight();
 
-        // Dimmed brand color background — brighter when focused
-        var factor = isFocused() ? 0.35 : 0.20;
-        var bgColor = DataFormat.dimColor(_brandColor, factor);
+        // Brightened brand color for background tint — ensures visibility
+        // even for very dark artColors like #1d2b38
+        var boosted = DataFormat.brightenColor(_brandColor, 80);
+        var factor = isFocused() ? 0.60 : 0.35;
+        var bgColor = DataFormat.dimColor(boosted, factor);
         dc.setColor(Graphics.COLOR_WHITE, bgColor);
         dc.clear();
 
-        // Brand-colored initial circle
+        // Brand-colored initial circle (boosted to be clearly visible)
         var iconCX = 26;
         var iconCY = h / 2;
-        dc.setColor(_brandColor, Graphics.COLOR_TRANSPARENT);
+        var circleColor = DataFormat.brightenColor(_brandColor, 140);
+        dc.setColor(circleColor, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(iconCX, iconCY, 15);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         var initial = _title.substring(0, 1);
