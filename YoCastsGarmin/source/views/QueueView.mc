@@ -17,12 +17,12 @@ class QueueView extends WatchUi.CustomMenu {
         System.println("YoCasts: QueueView initialized (CustomMenu)");
     }
 
-    //! Draw the "Queue" title area
+    //! Draw the "Queue" title area — centered for round display
     function drawTitle(dc as Graphics.Dc) as Void {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
-        dc.drawText(dc.getWidth() / 2, 8, Graphics.FONT_SMALL, "Queue",
-                    Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(dc.getWidth() / 2, dc.getHeight() / 2 - dc.getFontHeight(Graphics.FONT_SMALL) / 2,
+                    Graphics.FONT_SMALL, "Queue", Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     private function loadQueue() as Void {
@@ -125,37 +125,53 @@ class QueueEpisodeMenuItem extends WatchUi.CustomMenuItem {
     }
 
     function draw(dc as Graphics.Dc) as Void {
-        System.println("YoCasts: QueueEpisodeMenuItem.draw() CALLED — '" + _title + "' focused=" + isFocused());
         var w = dc.getWidth();
         var h = dc.getHeight();
 
-        // Brightened brand color for visible background tint
+        // AMOLED black surround
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
+        dc.clear();
+
+        // Rounded pill layout
+        var marginX = isFocused() ? 12 : 20;
+        var marginY = 4;
+        var itemW = w - 2 * marginX;
+        var itemH = h - 2 * marginY;
+        var radius = 14;
+
+        // Brand-tinted rounded rect background
         var boosted = DataFormat.brightenColor(_brandColor, 80);
         var factor = isFocused() ? 0.55 : 0.30;
         var bgColor = DataFormat.dimColor(boosted, factor);
-        dc.setColor(Graphics.COLOR_WHITE, bgColor);
-        dc.clear();
+        dc.setColor(bgColor, Graphics.COLOR_TRANSPARENT);
+        dc.fillRoundedRectangle(marginX, marginY, itemW, itemH, radius);
 
-        // Accent bar on left edge (boosted for visibility)
+        // Subtle focus border
+        if (isFocused()) {
+            var borderColor = DataFormat.brightenColor(_brandColor, 160);
+            dc.setColor(borderColor, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawRoundedRectangle(marginX, marginY, itemW, itemH, radius);
+        }
+
+        // Accent bar inside the rounded rect (left side)
         var barColor = DataFormat.brightenColor(_brandColor, 160);
         dc.setColor(barColor, Graphics.COLOR_TRANSPARENT);
-        dc.fillRectangle(0, 0, 4, h);
+        dc.fillRoundedRectangle(marginX, marginY, 5, itemH, 3);
 
-        // Title and subtitle layout
-        var textX = 14;
-        var maxTextW = w - textX - 8;
+        // Title and subtitle — positioned within the rounded rect
+        var textX = marginX + 14;
+        var maxTextW = (marginX + itemW) - textX - 12;
         var titleH = dc.getFontHeight(Graphics.FONT_TINY);
         var subH = dc.getFontHeight(Graphics.FONT_XTINY);
         var startY = (h - titleH - 2 - subH) / 2;
 
-        // Title in tint color (contrast-checked)
         var titleColor = DataFormat.ensureContrast(_tintColor, bgColor);
         dc.setColor(titleColor, Graphics.COLOR_TRANSPARENT);
         dc.drawText(textX, startY, Graphics.FONT_TINY,
                     DataFormat.truncateText(dc, _title, Graphics.FONT_TINY, maxTextW),
                     Graphics.TEXT_JUSTIFY_LEFT);
 
-        // Subtitle in dimmed tint
         var subColor = DataFormat.dimColor(_tintColor, 0.6);
         subColor = DataFormat.ensureContrast(subColor, bgColor);
         dc.setColor(subColor, Graphics.COLOR_TRANSPARENT);

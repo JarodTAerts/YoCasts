@@ -26,12 +26,12 @@ class EpisodeListView extends WatchUi.CustomMenu {
         System.println("YoCasts: EpisodeListView initialized (CustomMenu) for '" + podcastTitle + "'");
     }
 
-    //! Draw the podcast title area
+    //! Draw the podcast title area — centered for round display
     function drawTitle(dc as Graphics.Dc) as Void {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
-        dc.drawText(dc.getWidth() / 2, 8, Graphics.FONT_SMALL, _menuTitle,
-                    Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(dc.getWidth() / 2, dc.getHeight() / 2 - dc.getFontHeight(Graphics.FONT_SMALL) / 2,
+                    Graphics.FONT_SMALL, _menuTitle, Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     private function loadEpisodes() as Void {
@@ -229,19 +229,37 @@ class EpisodeMenuItem extends WatchUi.CustomMenuItem {
     }
 
     function draw(dc as Graphics.Dc) as Void {
-        System.println("YoCasts: EpisodeMenuItem.draw() CALLED — '" + _title + "' focused=" + isFocused());
         var w = dc.getWidth();
         var h = dc.getHeight();
 
-        // Brightened brand color for visible background tint
+        // AMOLED black surround
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
+        dc.clear();
+
+        // Rounded pill layout
+        var marginX = isFocused() ? 12 : 20;
+        var marginY = 4;
+        var itemW = w - 2 * marginX;
+        var itemH = h - 2 * marginY;
+        var radius = 14;
+
+        // Brand-tinted rounded rect background
         var boosted = DataFormat.brightenColor(_brandColor, 80);
         var factor = isFocused() ? 0.50 : 0.25;
         var bgColor = DataFormat.dimColor(boosted, factor);
-        dc.setColor(Graphics.COLOR_WHITE, bgColor);
-        dc.clear();
+        dc.setColor(bgColor, Graphics.COLOR_TRANSPARENT);
+        dc.fillRoundedRectangle(marginX, marginY, itemW, itemH, radius);
 
-        // Status indicator dot on the left (boosted for visibility)
-        var dotCX = 12;
+        // Subtle focus border
+        if (isFocused()) {
+            var borderColor = DataFormat.brightenColor(_brandColor, 160);
+            dc.setColor(borderColor, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawRoundedRectangle(marginX, marginY, itemW, itemH, radius);
+        }
+
+        // Status indicator dot — positioned inside the rounded rect
+        var dotCX = marginX + 14;
         var dotCY = h / 2;
         if (_status == DataKeys.STATUS_IN_PROGRESS) {
             dc.setColor(DataFormat.brightenColor(_brandColor, 160), Graphics.COLOR_TRANSPARENT);
@@ -256,21 +274,19 @@ class EpisodeMenuItem extends WatchUi.CustomMenuItem {
             dc.drawArc(dotCX, dotCY, 4, Graphics.ARC_CLOCKWISE, 0, 360);
         }
 
-        // Text layout
-        var textX = 26;
-        var maxTextW = w - textX - 8;
+        // Text — positioned within the rounded rect
+        var textX = dotCX + 12;
+        var maxTextW = (marginX + itemW) - textX - 12;
         var titleH = dc.getFontHeight(Graphics.FONT_TINY);
         var subH = dc.getFontHeight(Graphics.FONT_XTINY);
         var startY = (h - titleH - 2 - subH) / 2;
 
-        // Title — accent tint color (contrast-checked)
         var titleColor = DataFormat.ensureContrast(_tintColor, bgColor);
         dc.setColor(titleColor, Graphics.COLOR_TRANSPARENT);
         dc.drawText(textX, startY, Graphics.FONT_TINY,
                     DataFormat.truncateText(dc, _title, Graphics.FONT_TINY, maxTextW),
                     Graphics.TEXT_JUSTIFY_LEFT);
 
-        // Subtitle — dimmed
         var subColor = DataFormat.dimColor(_tintColor, 0.55);
         subColor = DataFormat.ensureContrast(subColor, bgColor);
         dc.setColor(subColor, Graphics.COLOR_TRANSPARENT);

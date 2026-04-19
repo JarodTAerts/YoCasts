@@ -18,12 +18,12 @@ class SubscribedView extends WatchUi.CustomMenu {
         System.println("YoCasts: SubscribedView initialized (CustomMenu)");
     }
 
-    //! Draw the "Podcasts" title area
+    //! Draw the "Podcasts" title area — centered for round display
     function drawTitle(dc as Graphics.Dc) as Void {
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
         dc.clear();
-        dc.drawText(dc.getWidth() / 2, 8, Graphics.FONT_SMALL, "Podcasts",
-                    Graphics.TEXT_JUSTIFY_CENTER);
+        dc.drawText(dc.getWidth() / 2, dc.getHeight() / 2 - dc.getFontHeight(Graphics.FONT_SMALL) / 2,
+                    Graphics.FONT_SMALL, "Podcasts", Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     private function loadPodcasts() as Void {
@@ -126,47 +126,70 @@ class PodcastMenuItem extends WatchUi.CustomMenuItem {
     }
 
     function draw(dc as Graphics.Dc) as Void {
-        System.println("YoCasts: PodcastMenuItem.draw() CALLED — '" + _title + "' brand=0x" + _brandColor.format("%06X") + " focused=" + isFocused());
         var w = dc.getWidth();
         var h = dc.getHeight();
 
-        // Brightened brand color for background tint — ensures visibility
-        // even for very dark artColors like #1d2b38
+        // AMOLED black surround
+        dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
+        dc.clear();
+
+        // Rounded pill layout
+        var marginX = isFocused() ? 12 : 20;
+        var marginY = 4;
+        var itemW = w - 2 * marginX;
+        var itemH = h - 2 * marginY;
+        var radius = 14;
+
+        // Brand-tinted rounded rect background
         var boosted = DataFormat.brightenColor(_brandColor, 80);
         var factor = isFocused() ? 0.60 : 0.35;
         var bgColor = DataFormat.dimColor(boosted, factor);
-        dc.setColor(Graphics.COLOR_WHITE, bgColor);
-        dc.clear();
+        dc.setColor(bgColor, Graphics.COLOR_TRANSPARENT);
+        dc.fillRoundedRectangle(marginX, marginY, itemW, itemH, radius);
 
-        // Brand-colored initial circle (boosted to be clearly visible)
-        var iconCX = 26;
+        // Subtle focus border
+        if (isFocused()) {
+            var borderColor = DataFormat.brightenColor(_brandColor, 160);
+            dc.setColor(borderColor, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawRoundedRectangle(marginX, marginY, itemW, itemH, radius);
+        }
+
+        // Polished initial circle — large, with ring border
+        // TODO: Future work — load actual cover art via Communications.makeImageRequest()
+        // using DataKeys.P_ART_URL. For now, show a styled initial circle.
+        var iconCX = marginX + 32;
         var iconCY = h / 2;
+        var circleR = 20;
         var circleColor = DataFormat.brightenColor(_brandColor, 140);
         dc.setColor(circleColor, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(iconCX, iconCY, 15);
+        dc.fillCircle(iconCX, iconCY, circleR);
+        // Outer ring for polish
+        dc.setColor(DataFormat.brightenColor(_brandColor, 200), Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        dc.drawCircle(iconCX, iconCY, circleR);
+        // Initial letter
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
         var initial = _title.substring(0, 1);
         if (initial != null) {
-            dc.drawText(iconCX, iconCY - dc.getFontHeight(Graphics.FONT_XTINY) / 2,
-                        Graphics.FONT_XTINY, initial as String,
+            dc.drawText(iconCX, iconCY - dc.getFontHeight(Graphics.FONT_TINY) / 2,
+                        Graphics.FONT_TINY, initial as String,
                         Graphics.TEXT_JUSTIFY_CENTER);
         }
 
-        // Title and author — vertically centered to the right of icon
-        var textX = 50;
-        var maxTextW = w - textX - 8;
+        // Title and author — positioned within the rounded rect
+        var textX = iconCX + circleR + 10;
+        var maxTextW = (marginX + itemW) - textX - 12;
         var titleH = dc.getFontHeight(Graphics.FONT_TINY);
         var authorH = dc.getFontHeight(Graphics.FONT_XTINY);
         var startY = (h - titleH - 2 - authorH) / 2;
 
-        // Use tint color for title (with contrast check against dimmed bg)
         var titleColor = DataFormat.ensureContrast(_tintColor, bgColor);
         dc.setColor(titleColor, Graphics.COLOR_TRANSPARENT);
         dc.drawText(textX, startY, Graphics.FONT_TINY,
                     DataFormat.truncateText(dc, _title, Graphics.FONT_TINY, maxTextW),
                     Graphics.TEXT_JUSTIFY_LEFT);
 
-        // Dimmed tint for author subtitle
         var authorColor = DataFormat.dimColor(_tintColor, 0.65);
         authorColor = DataFormat.ensureContrast(authorColor, bgColor);
         dc.setColor(authorColor, Graphics.COLOR_TRANSPARENT);
