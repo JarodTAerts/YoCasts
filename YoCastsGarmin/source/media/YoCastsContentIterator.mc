@@ -7,11 +7,13 @@ import Toybox.System;
 //! Each call to get()/next()/previous() returns a ContentObj via
 //! Media.getCachedContentObj().
 //!
+//! Maintains parallel refId → UUID mapping for track identification.
 //! Empty playlist is safe — native player shows "No Media" when get()
 //! returns null.
 class YoCastsContentIterator extends Media.ContentIterator {
 
     private var _refIds as Array<String> = [] as Array<String>;
+    private var _uuids as Array<String> = [] as Array<String>;
     private var _currentIndex as Number = -1;
 
     function initialize() {
@@ -22,6 +24,7 @@ class YoCastsContentIterator extends Media.ContentIterator {
     //! Build playlist from downloaded episodes in DownloadQueue order.
     private function _buildPlaylist() as Void {
         _refIds = [] as Array<String>;
+        _uuids = [] as Array<String>;
 
         var downloads = DownloadQueue.getDownloads();
         for (var i = 0; i < downloads.size(); i++) {
@@ -38,6 +41,7 @@ class YoCastsContentIterator extends Media.ContentIterator {
             if (refId == null) { continue; }
 
             _refIds.add(refId as String);
+            _uuids.add(uuid as String);
         }
 
         if (_refIds.size() > 0) {
@@ -104,6 +108,59 @@ class YoCastsContentIterator extends Media.ContentIterator {
     function shuffling() as Boolean {
         return false;
     }
+
+    // ================================================================
+    // Episode selection & lookup (Phase D additions)
+    // ================================================================
+
+    //! Jump to a specific episode by UUID. Returns true if found.
+    function setCurrentByUuid(uuid as String) as Boolean {
+        for (var i = 0; i < _uuids.size(); i++) {
+            if (_uuids[i].equals(uuid)) {
+                _currentIndex = i;
+                System.println("YoCasts Iterator: set current to " + uuid +
+                    " (index " + i + ")");
+                return true;
+            }
+        }
+        System.println("YoCasts Iterator: uuid not in playlist " + uuid);
+        return false;
+    }
+
+    //! Get the episode UUID of the current track.
+    function getCurrentEpisodeUuid() as String {
+        if (_currentIndex >= 0 && _currentIndex < _uuids.size()) {
+            return _uuids[_currentIndex];
+        }
+        return "";
+    }
+
+    //! Get the ContentRef ID of the current track.
+    function getCurrentRefId() as String {
+        if (_currentIndex >= 0 && _currentIndex < _refIds.size()) {
+            return _refIds[_currentIndex];
+        }
+        return "";
+    }
+
+    //! Number of playable episodes in the playlist.
+    function getPlaylistSize() as Number {
+        return _refIds.size();
+    }
+
+    //! Look up UUID for a given ContentRef ID (reverse mapping).
+    function getUuidForRefId(refId as String) as String {
+        for (var i = 0; i < _refIds.size(); i++) {
+            if (_refIds[i].equals(refId)) {
+                return _uuids[i];
+            }
+        }
+        return "";
+    }
+
+    // ================================================================
+    // Internal
+    // ================================================================
 
     //! Get a ContentObj at the given index from the media cache.
     //! Returns null if index is out of bounds or content is unavailable.

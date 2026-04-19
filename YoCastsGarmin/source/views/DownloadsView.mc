@@ -381,14 +381,26 @@ class DownloadsDelegate extends WatchUi.InputDelegate {
         var status = dl[DownloadQueue.DL_STATUS] as Number;
 
         if (status == DownloadQueue.STATUS_DOWNLOADED) {
-            // Navigate to Now Playing
+            // Build episode dict and load cached position for resume
             var ep = DownloadQueue.toEpisodeDict(dl);
+            var uuid = dl[DownloadQueue.DL_UUID] as String;
+            var cached = CacheManager.loadPlaybackPosition(uuid);
+            if (cached != null) {
+                var pos = (cached as Dictionary).get("position");
+                if (pos != null && pos instanceof Number) {
+                    ep.put(DataKeys.E_PLAYED_UP_TO, pos);
+                }
+            }
+
             var npView = new NowPlayingView(ep);
             var npDelegate = new NowPlayingDelegate(ep);
             npDelegate.setView(npView);
             WatchUi.pushView(npView, npDelegate, WatchUi.SLIDE_UP);
         } else if (status == DownloadQueue.STATUS_FAILED) {
-            _view.showToast("Retry not available yet");
+            // Reset failed item to pending for retry on next sync
+            var uuid = dl[DownloadQueue.DL_UUID] as String;
+            DownloadQueue.updateStatus(uuid, DownloadQueue.STATUS_PENDING);
+            _view.showToast("Queued for retry");
         } else if (status == DownloadQueue.STATUS_DOWNLOADING) {
             _view.showToast("Downloading...");
         } else {

@@ -64,6 +64,18 @@ class NowPlayingView extends WatchUi.View {
             podUuid,
             episode[DataKeys.E_DURATION] as Number
         );
+
+        // Initialize shared PlaybackState so HomeMenuView dock stays current
+        PlaybackState.update(
+            episode[DataKeys.E_UUID] as String,
+            podUuid,
+            episode[DataKeys.E_TITLE] as String,
+            (episode.get(DataKeys.E_PODCAST_TITLE) != null)
+                ? episode[DataKeys.E_PODCAST_TITLE] as String : "",
+            _currentPosition,
+            episode[DataKeys.E_DURATION] as Number,
+            false
+        );
     }
 
     function onShow() as Void {
@@ -264,6 +276,7 @@ class NowPlayingView extends WatchUi.View {
             _positionTracker.logNow();
             _positionTracker.stopTracking();
         }
+        PlaybackState.setPlaying(_isPlaying);
         WatchUi.requestUpdate();
     }
 
@@ -277,6 +290,7 @@ class NowPlayingView extends WatchUi.View {
         if (_positionTracker.isTracking()) {
             _positionTracker.logNow();
         }
+        PlaybackState.updatePosition(_currentPosition);
         WatchUi.requestUpdate();
     }
 
@@ -289,6 +303,7 @@ class NowPlayingView extends WatchUi.View {
         if (_positionTracker.isTracking()) {
             _positionTracker.logNow();
         }
+        PlaybackState.updatePosition(_currentPosition);
         WatchUi.requestUpdate();
     }
 }

@@ -164,6 +164,19 @@ class EpisodeActionDelegate extends WatchUi.Menu2InputDelegate {
         if (id == :play || id == :downloaded) {
             // Pop action menu, then push Now Playing
             WatchUi.popView(WatchUi.SLIDE_DOWN);
+
+            // If downloaded, load cached position for resume
+            var uuid = _episode[DataKeys.E_UUID] as String;
+            if (DownloadQueue.getStatus(uuid) == DownloadQueue.STATUS_DOWNLOADED) {
+                var cached = CacheManager.loadPlaybackPosition(uuid);
+                if (cached != null) {
+                    var pos = (cached as Dictionary).get("position");
+                    if (pos != null && pos instanceof Number) {
+                        _episode.put(DataKeys.E_PLAYED_UP_TO, pos);
+                    }
+                }
+            }
+
             var npView = new NowPlayingView(_episode);
             var npDelegate = new NowPlayingDelegate(_episode);
             npDelegate.setView(npView);
