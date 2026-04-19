@@ -8,19 +8,21 @@ import Toybox.Time;
 //!
 //! Entries persist in Application.Storage under "yc_changelog".
 //! Coalescing: multiple POSITION_UPDATEs for the same episode keep only the latest.
-//! Max 100 entries — oldest non-completion entries are evicted first.
+//! Max 50 entries — oldest non-completion entries are evicted first.
 module ChangeLog {
 
     // Change types
     const TYPE_POSITION_UPDATE = "POSITION_UPDATE";
     const TYPE_EPISODE_COMPLETED = "EPISODE_COMPLETED";
     const TYPE_QUEUE_REMOVE = "QUEUE_REMOVE";
+    const TYPE_STATUS_CHANGE = "STATUS_CHANGE";
+    const TYPE_QUEUE_ADD = "QUEUE_ADD";
 
     // Storage keys
     const KEY_CHANGELOG = "yc_changelog";
     const KEY_CHANGELOG_SEQ = "yc_cl_seq";
 
-    const MAX_ENTRIES = 100;
+    const MAX_ENTRIES = 50;
 
     //! Add a changelog entry. Coalesces POSITION_UPDATEs for the same episode.
     //! @param type One of TYPE_POSITION_UPDATE, TYPE_EPISODE_COMPLETED, TYPE_QUEUE_REMOVE
@@ -91,6 +93,50 @@ module ChangeLog {
     //! Number of pending entries (for UI display, e.g., "3 pending syncs").
     function getEntryCount() as Number {
         return getEntries().size();
+    }
+
+    // ================================================================
+    // Convenience methods (Phase A API surface)
+    // ================================================================
+
+    //! Log a playback position update. Coalesces with prior updates for
+    //! the same episode (only the latest position is retained).
+    function logPositionUpdate(episodeUuid as String, podcastUuid as String,
+                               position as Number, duration as Number) as Void {
+        addEntry(TYPE_POSITION_UPDATE, episodeUuid, podcastUuid, {
+            "position" => position as Application.Storage.ValueType,
+            "status" => DataKeys.STATUS_IN_PROGRESS as Application.Storage.ValueType,
+            "duration" => duration as Application.Storage.ValueType
+        });
+    }
+
+    //! Log an episode status change (e.g., completed, in-progress).
+    function logStatusChange(episodeUuid as String, podcastUuid as String,
+                             status as Number) as Void {
+        addEntry(TYPE_STATUS_CHANGE, episodeUuid, podcastUuid, {
+            "status" => status as Application.Storage.ValueType
+        });
+    }
+
+    //! Log a queue mutation (add or remove).
+    //! @param action "add" or "remove"
+    function logQueueAction(episodeUuid as String, podcastUuid as String,
+                            action as String) as Void {
+        var type = TYPE_QUEUE_REMOVE;
+        if (action.equals("add")) {
+            type = TYPE_QUEUE_ADD;
+        }
+        addEntry(type, episodeUuid, podcastUuid, {} as Dictionary);
+    }
+
+    //! Alias for getEntries() — used by sync engine.
+    function getChangelog() as Array<Dictionary> {
+        return getEntries();
+    }
+
+    //! Alias for clearEntries() — used after successful sync push.
+    function clearChangelog() as Void {
+        clearEntries();
     }
 
     //! Evict the oldest non-completion entry. If all entries are completions,

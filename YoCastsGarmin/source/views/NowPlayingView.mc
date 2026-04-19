@@ -13,6 +13,7 @@ class NowPlayingView extends WatchUi.View {
     private var _episode as Dictionary;
     private var _isPlaying as Boolean = false;
     private var _currentPosition as Number;
+    private var _positionTracker as PositionTracker;
 
     // --- Layout constants from spec §7.2 ---
     private const CX = 195;
@@ -55,6 +56,14 @@ class NowPlayingView extends WatchUi.View {
         View.initialize();
         _episode = episode;
         _currentPosition = (episode[DataKeys.E_PLAYED_UP_TO] as Number);
+
+        var podUuidVal = episode.get(DataKeys.E_PODCAST_UUID);
+        var podUuid = (podUuidVal != null) ? podUuidVal as String : "";
+        _positionTracker = new PositionTracker(
+            episode[DataKeys.E_UUID] as String,
+            podUuid,
+            episode[DataKeys.E_DURATION] as Number
+        );
     }
 
     function onShow() as Void {
@@ -68,6 +77,7 @@ class NowPlayingView extends WatchUi.View {
         if (_marqueeTimer != null) {
             (_marqueeTimer as Timer.Timer).stop();
         }
+        _positionTracker.stopTracking();
     }
 
     //! Marquee timer callback — animates overflowing text
@@ -240,9 +250,20 @@ class NowPlayingView extends WatchUi.View {
         dc.clearClip();
     }
 
-    //! Toggle play/pause state
+    //! Public accessor for PositionTracker to read current position.
+    function getCurrentPosition() as Number {
+        return _currentPosition;
+    }
+
+    //! Toggle play/pause state and start/stop position tracking.
     function togglePlayPause() as Void {
         _isPlaying = !_isPlaying;
+        if (_isPlaying) {
+            _positionTracker.startTracking(self);
+        } else {
+            _positionTracker.logNow();
+            _positionTracker.stopTracking();
+        }
         WatchUi.requestUpdate();
     }
 
@@ -253,6 +274,9 @@ class NowPlayingView extends WatchUi.View {
         if (_currentPosition > duration) {
             _currentPosition = duration;
         }
+        if (_positionTracker.isTracking()) {
+            _positionTracker.logNow();
+        }
         WatchUi.requestUpdate();
     }
 
@@ -261,6 +285,9 @@ class NowPlayingView extends WatchUi.View {
         _currentPosition = _currentPosition - 15;
         if (_currentPosition < 0) {
             _currentPosition = 0;
+        }
+        if (_positionTracker.isTracking()) {
+            _positionTracker.logNow();
         }
         WatchUi.requestUpdate();
     }
