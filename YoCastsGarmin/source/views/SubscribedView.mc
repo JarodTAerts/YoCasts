@@ -36,8 +36,10 @@ class SubscribedView extends WatchUi.Menu2 {
             var uuid = pod[DataKeys.P_UUID] as String;
 
             var artColorVal = pod.get(DataKeys.P_ART_COLOR);
+            var artTintVal = pod.get(DataKeys.P_ART_TINT);
             var color = (artColorVal != null && artColorVal instanceof Number) ? (artColorVal as Number) : 0x333333;
-            addItem(new PodcastMenuItem(uuid, title, author, color));
+            var tint = (artTintVal != null && artTintVal instanceof Number) ? (artTintVal as Number) : 0xFFFFFF;
+            addItem(new PodcastMenuItem(uuid, title, author, color, tint));
         }
     }
 }
@@ -80,13 +82,15 @@ class PodcastMenuItem extends WatchUi.CustomMenuItem {
     private var _title as String;
     private var _author as String;
     private var _brandColor as Number;
+    private var _tintColor as Number;
 
-    function initialize(id as String, title as String, author as String, brandColor as Number) {
+    function initialize(id as String, title as String, author as String, brandColor as Number, tintColor as Number) {
         CustomMenuItem.initialize(id, {});
         setLabel(title);
         _title = title;
         _author = author;
         _brandColor = brandColor;
+        _tintColor = tintColor;
     }
 
     function draw(dc as Graphics.Dc) as Void {
@@ -119,12 +123,17 @@ class PodcastMenuItem extends WatchUi.CustomMenuItem {
         var authorH = dc.getFontHeight(Graphics.FONT_XTINY);
         var startY = (h - titleH - 2 - authorH) / 2;
 
-        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
+        // Use tint color for title (with contrast check against dimmed bg)
+        var titleColor = DataFormat.ensureContrast(_tintColor, bgColor);
+        dc.setColor(titleColor, Graphics.COLOR_TRANSPARENT);
         dc.drawText(textX, startY, Graphics.FONT_TINY,
                     DataFormat.truncateText(dc, _title, Graphics.FONT_TINY, maxTextW),
                     Graphics.TEXT_JUSTIFY_LEFT);
 
-        dc.setColor(0xBBBBBB, Graphics.COLOR_TRANSPARENT);
+        // Dimmed tint for author subtitle
+        var authorColor = DataFormat.dimColor(_tintColor, 0.65);
+        authorColor = DataFormat.ensureContrast(authorColor, bgColor);
+        dc.setColor(authorColor, Graphics.COLOR_TRANSPARENT);
         dc.drawText(textX, startY + titleH + 2, Graphics.FONT_XTINY,
                     DataFormat.truncateText(dc, _author, Graphics.FONT_XTINY, maxTextW),
                     Graphics.TEXT_JUSTIFY_LEFT);

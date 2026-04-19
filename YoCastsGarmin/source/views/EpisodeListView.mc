@@ -1,9 +1,11 @@
 import Toybox.Lang;
 import Toybox.WatchUi;
 import Toybox.System;
+import Toybox.Graphics;
 
 //! Episode list for a specific podcast.
-//! Shows episode titles with duration and play status.
+//! Shows episode titles with duration and play status, themed
+//! with the parent podcast's brand colors.
 //! Selecting an episode opens an action menu (Play / Download).
 class EpisodeListView extends WatchUi.Menu2 {
 
@@ -35,6 +37,12 @@ class EpisodeListView extends WatchUi.Menu2 {
             addItem(new WatchUi.MenuItem(label, "", :empty, {}));
             return;
         }
+
+        // Look up parent podcast brand colors
+        var podcasts = _service.getSubscribedPodcasts();
+        var colors = DataFormat.lookupPodcastColors(podcasts, _podcastUuid);
+        var artColor = colors[0] as Number;
+        var artTint = colors[1] as Number;
 
         // Cap at 15 episodes per memory budget
         var limit = episodes.size() < 15 ? episodes.size() : 15;
@@ -68,7 +76,7 @@ class EpisodeListView extends WatchUi.Menu2 {
                 sub = sub + " | \u274C";
             }
 
-            addItem(new WatchUi.MenuItem(title, sub, uuid, {}));
+            addItem(new EpisodeMenuItem(uuid, title, sub, status, artColor, artTint));
         }
     }
 }
@@ -173,5 +181,76 @@ class EpisodeActionDelegate extends WatchUi.Menu2InputDelegate {
 
     function onBack() as Void {
         WatchUi.popView(WatchUi.SLIDE_DOWN);
+    }
+}
+
+//! Custom menu item for episodes with parent podcast brand color tinting.
+//! Shows a status indicator dot and episode info on a tinted background.
+class EpisodeMenuItem extends WatchUi.CustomMenuItem {
+
+    private var _title as String;
+    private var _subtitle as String;
+    private var _status as Number;
+    private var _brandColor as Number;
+    private var _tintColor as Number;
+
+    function initialize(id as String, title as String, subtitle as String,
+                        status as Number, brandColor as Number, tintColor as Number) {
+        CustomMenuItem.initialize(id, {});
+        setLabel(title);
+        _title = title;
+        _subtitle = subtitle;
+        _status = status;
+        _brandColor = brandColor;
+        _tintColor = tintColor;
+    }
+
+    function draw(dc as Graphics.Dc) as Void {
+        var w = dc.getWidth();
+        var h = dc.getHeight();
+
+        // Subtle brand color background — slightly brighter when focused
+        var factor = isFocused() ? 0.22 : 0.10;
+        var bgColor = DataFormat.dimColor(_brandColor, factor);
+        dc.setColor(Graphics.COLOR_WHITE, bgColor);
+        dc.clear();
+
+        // Status indicator dot on the left
+        var dotCX = 12;
+        var dotCY = h / 2;
+        if (_status == DataKeys.STATUS_IN_PROGRESS) {
+            dc.setColor(_brandColor, Graphics.COLOR_TRANSPARENT);
+            dc.fillCircle(dotCX, dotCY, 4);
+        } else if (_status == DataKeys.STATUS_NOT_PLAYED) {
+            dc.setColor(_tintColor, Graphics.COLOR_TRANSPARENT);
+            dc.fillCircle(dotCX, dotCY, 4);
+        } else {
+            // Completed — dim ring
+            dc.setColor(DataFormat.dimColor(_brandColor, 0.5), Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(1);
+            dc.drawArc(dotCX, dotCY, 4, Graphics.ARC_CLOCKWISE, 0, 360);
+        }
+
+        // Text layout
+        var textX = 26;
+        var maxTextW = w - textX - 8;
+        var titleH = dc.getFontHeight(Graphics.FONT_TINY);
+        var subH = dc.getFontHeight(Graphics.FONT_XTINY);
+        var startY = (h - titleH - 2 - subH) / 2;
+
+        // Title — accent tint color (contrast-checked)
+        var titleColor = DataFormat.ensureContrast(_tintColor, bgColor);
+        dc.setColor(titleColor, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(textX, startY, Graphics.FONT_TINY,
+                    DataFormat.truncateText(dc, _title, Graphics.FONT_TINY, maxTextW),
+                    Graphics.TEXT_JUSTIFY_LEFT);
+
+        // Subtitle — dimmed
+        var subColor = DataFormat.dimColor(_tintColor, 0.55);
+        subColor = DataFormat.ensureContrast(subColor, bgColor);
+        dc.setColor(subColor, Graphics.COLOR_TRANSPARENT);
+        dc.drawText(textX, startY + titleH + 2, Graphics.FONT_XTINY,
+                    DataFormat.truncateText(dc, _subtitle, Graphics.FONT_XTINY, maxTextW),
+                    Graphics.TEXT_JUSTIFY_LEFT);
     }
 }

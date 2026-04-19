@@ -102,6 +102,44 @@ module DataFormat {
         return (r << 16) | (g << 8) | b;
     }
 
+    //! Calculate perceived luminance of a color (0.0 = dark, 1.0 = bright)
+    function luminance(color as Number) as Float {
+        var r = ((color >> 16) & 0xFF).toFloat() / 255.0;
+        var g = ((color >> 8) & 0xFF).toFloat() / 255.0;
+        var b = (color & 0xFF).toFloat() / 255.0;
+        return 0.299 * r + 0.587 * g + 0.114 * b;
+    }
+
+    //! Ensure adequate contrast between text and background colors.
+    //! Returns fgColor if contrast is sufficient, otherwise white or black.
+    function ensureContrast(fgColor as Number, bgColor as Number) as Number {
+        var fgLum = luminance(fgColor);
+        var bgLum = luminance(bgColor);
+        var diff = fgLum - bgLum;
+        if (diff < 0.0) { diff = -diff; }
+        if (diff > 0.25) {
+            return fgColor;
+        }
+        return bgLum < 0.5 ? 0xFFFFFF : 0x000000;
+    }
+
+    //! Look up brand colors for a podcast UUID from the subscribed list.
+    //! Returns a 2-element Array: [artColor, artTint].
+    function lookupPodcastColors(podcasts as Array<Dictionary>, podcastUuid as String) as Array<Number> {
+        for (var i = 0; i < podcasts.size(); i++) {
+            var pod = podcasts[i] as Dictionary;
+            var uuid = pod.get(DataKeys.P_UUID);
+            if (uuid != null && (uuid as String).equals(podcastUuid)) {
+                var colorVal = pod.get(DataKeys.P_ART_COLOR);
+                var tintVal = pod.get(DataKeys.P_ART_TINT);
+                var color = (colorVal != null && colorVal instanceof Number) ? (colorVal as Number) : 0x333333;
+                var tint = (tintVal != null && tintVal instanceof Number) ? (tintVal as Number) : 0xFFFFFF;
+                return [color, tint] as Array<Number>;
+            }
+        }
+        return [0x333333, 0xFFFFFF] as Array<Number>;
+    }
+
     //! Truncate text to fit within maxWidth pixels, appending "..." if needed.
     //! Uses binary search for efficiency on long strings.
     function truncateText(dc as Graphics.Dc, text as String, font as Graphics.FontDefinition, maxWidth as Number) as String {
