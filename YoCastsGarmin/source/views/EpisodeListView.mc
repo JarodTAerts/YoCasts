@@ -4,24 +4,34 @@ import Toybox.System;
 import Toybox.Graphics;
 
 //! Episode list for a specific podcast.
+//! Uses CustomMenu so CustomMenuItem.draw() is invoked by the runtime.
 //! Shows episode titles with duration and play status, themed
 //! with the parent podcast's brand colors.
 //! Selecting an episode opens an action menu (Play / Download).
-class EpisodeListView extends WatchUi.Menu2 {
+class EpisodeListView extends WatchUi.CustomMenu {
 
     private var _service as IPodcastService;
     private var _podcastUuid as String;
+    private var _menuTitle as String;
 
     function initialize(service as IPodcastService, podcastUuid as String, podcastTitle as String) {
-        // Truncate title for menu header
-        var menuTitle = podcastTitle;
-        if (menuTitle.length() > 18) {
-            menuTitle = menuTitle.substring(0, 15) + "...";
-        }
-        Menu2.initialize({:title => menuTitle});
+        CustomMenu.initialize(80, Graphics.COLOR_BLACK, {:titleItemHeight => 50});
         _service = service;
         _podcastUuid = podcastUuid;
+        _menuTitle = podcastTitle;
+        if (_menuTitle.length() > 18) {
+            _menuTitle = (_menuTitle.substring(0, 15) as String) + "...";
+        }
         loadEpisodes();
+        System.println("YoCasts: EpisodeListView initialized (CustomMenu) for '" + podcastTitle + "'");
+    }
+
+    //! Draw the podcast title area
+    function drawTitle(dc as Graphics.Dc) as Void {
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
+        dc.clear();
+        dc.drawText(dc.getWidth() / 2, 8, Graphics.FONT_SMALL, _menuTitle,
+                    Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     private function loadEpisodes() as Void {
@@ -31,10 +41,11 @@ class EpisodeListView extends WatchUi.Menu2 {
         }
 
         var episodes = _service.getEpisodesForPodcast(_podcastUuid);
+        System.println("YoCasts: loadEpisodes() — " + episodes.size() + " episodes for " + _podcastUuid);
 
         if (episodes.size() == 0) {
             var label = _service.hasEpisodesForPodcast(_podcastUuid) ? "No episodes" : "Loading...";
-            addItem(new WatchUi.MenuItem(label, "", :empty, {}));
+            addItem(new EmptyStateMenuItem(label));
             return;
         }
 
@@ -209,8 +220,7 @@ class EpisodeMenuItem extends WatchUi.CustomMenuItem {
 
     function initialize(id as String, title as String, subtitle as String,
                         status as Number, brandColor as Number, tintColor as Number) {
-        CustomMenuItem.initialize(id, {:height => 80});
-        setLabel(title);
+        CustomMenuItem.initialize(id, {});
         _title = title;
         _subtitle = subtitle;
         _status = status;
@@ -219,7 +229,7 @@ class EpisodeMenuItem extends WatchUi.CustomMenuItem {
     }
 
     function draw(dc as Graphics.Dc) as Void {
-        System.println("YoCasts: EpisodeMenuItem.draw() called — " + _title);
+        System.println("YoCasts: EpisodeMenuItem.draw() CALLED — '" + _title + "' focused=" + isFocused());
         var w = dc.getWidth();
         var h = dc.getHeight();
 

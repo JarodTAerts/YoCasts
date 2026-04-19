@@ -626,11 +626,13 @@ class HomeMenuDelegate extends WatchUi.InputDelegate {
     }
 
     private function navigateToQueue() as Void {
+        System.println("YoCasts: HomeMenu → navigateToQueue()");
         var queueView = new QueueView(_service);
         WatchUi.pushView(queueView, new QueueDelegate(_service), WatchUi.SLIDE_UP);
     }
 
     private function navigateToPodcasts() as Void {
+        System.println("YoCasts: HomeMenu → navigateToPodcasts()");
         var podView = new SubscribedView(_service);
         WatchUi.pushView(podView, new SubscribedDelegate(_service), WatchUi.SLIDE_UP);
     }

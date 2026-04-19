@@ -4,26 +4,35 @@ import Toybox.Graphics;
 import Toybox.System;
 
 //! Queue view showing the user's Up Next episodes.
-//! Uses Menu2 with custom colored items per podcast brand.
+//! Uses CustomMenu so CustomMenuItem.draw() is invoked by the runtime.
 //! Selecting an episode navigates to Now Playing.
-class QueueView extends WatchUi.Menu2 {
+class QueueView extends WatchUi.CustomMenu {
 
     private var _service as IPodcastService;
 
     function initialize(service as IPodcastService) {
-        Menu2.initialize({:title => "Queue"});
+        CustomMenu.initialize(80, Graphics.COLOR_BLACK, {:titleItemHeight => 50});
         _service = service;
         loadQueue();
+        System.println("YoCasts: QueueView initialized (CustomMenu)");
+    }
+
+    //! Draw the "Queue" title area
+    function drawTitle(dc as Graphics.Dc) as Void {
+        dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_BLACK);
+        dc.clear();
+        dc.drawText(dc.getWidth() / 2, 8, Graphics.FONT_SMALL, "Queue",
+                    Graphics.TEXT_JUSTIFY_CENTER);
     }
 
     private function loadQueue() as Void {
         var queue = _service.getQueue();
+        System.println("YoCasts: loadQueue() — " + queue.size() + " episodes available");
 
         if (queue.size() == 0) {
-            var sub = _service.isDataReady() ? "Sync from phone" : "Loading...";
-            addItem(new WatchUi.MenuItem(
-                _service.isDataReady() ? "Queue is empty" : "Loading...",
-                sub, :empty, {}));
+            var label = _service.isDataReady() ? "Queue is empty" : "Loading...";
+            System.println("YoCasts: loadQueue() — empty state: " + label);
+            addItem(new EmptyStateMenuItem(label));
             return;
         }
 
@@ -53,10 +62,12 @@ class QueueView extends WatchUi.Menu2 {
             var colors = DataFormat.lookupPodcastColors(podcasts, podUuid);
             var artColor = colors[0] as Number;
             var artTint = colors[1] as Number;
+            System.println("YoCasts: queue[" + i + "] '" + title + "' color=0x" + artColor.format("%06X") + " tint=0x" + artTint.format("%06X"));
 
             addItem(new QueueEpisodeMenuItem(
                 ep[DataKeys.E_UUID] as String, title, sub, artColor, artTint));
         }
+        System.println("YoCasts: loadQueue() — added " + limit + " QueueEpisodeMenuItems to CustomMenu");
     }
 }
 
@@ -106,8 +117,7 @@ class QueueEpisodeMenuItem extends WatchUi.CustomMenuItem {
 
     function initialize(id as String, title as String, subtitle as String,
                         brandColor as Number, tintColor as Number) {
-        CustomMenuItem.initialize(id, {:height => 80});
-        setLabel(title);
+        CustomMenuItem.initialize(id, {});
         _title = title;
         _subtitle = subtitle;
         _brandColor = brandColor;
@@ -115,7 +125,7 @@ class QueueEpisodeMenuItem extends WatchUi.CustomMenuItem {
     }
 
     function draw(dc as Graphics.Dc) as Void {
-        System.println("YoCasts: QueueEpisodeMenuItem.draw() called — " + _title);
+        System.println("YoCasts: QueueEpisodeMenuItem.draw() CALLED — '" + _title + "' focused=" + isFocused());
         var w = dc.getWidth();
         var h = dc.getHeight();
 

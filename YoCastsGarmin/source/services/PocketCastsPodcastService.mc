@@ -250,6 +250,9 @@ class PocketCastsPodcastService extends IPodcastService {
             var raw = dict.get("podcasts");
             if (raw != null && raw instanceof Array) {
                 var arr = raw as Array;
+                if (arr.size() > 0) {
+                    System.println("YoCasts: raw podcast[0] keys: " + (arr[0] as Dictionary).keys().toString());
+                }
                 _podcasts = [] as Array<Dictionary>;
                 var limit = arr.size() < MAX_PODCASTS ? arr.size() : MAX_PODCASTS;
                 for (var i = 0; i < limit; i++) {
@@ -279,6 +282,8 @@ class PocketCastsPodcastService extends IPodcastService {
         var artTintStr = _strOr(p.get("artTint"), "");
         var artColor = artColorStr.length() >= 7 ? DataFormat.parseHexColor(artColorStr) : 0x333333;
         var artTint = artTintStr.length() >= 7 ? DataFormat.parseHexColor(artTintStr) : 0xAAAAAA;
+        var title = _strOr(p.get("title"), "Untitled");
+        System.println("YoCasts: _transformPodcast '" + title + "' artColorStr='" + artColorStr + "' parsed=0x" + artColor.format("%06X") + " artTintStr='" + artTintStr + "' parsed=0x" + artTint.format("%06X"));
         return {
             DataKeys.P_UUID => _strOr(p.get("uuid"), ""),
             DataKeys.P_TITLE => _strOr(p.get("title"), "Untitled"),
