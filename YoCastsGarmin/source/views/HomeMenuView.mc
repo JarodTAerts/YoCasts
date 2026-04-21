@@ -21,13 +21,12 @@ class HomeMenuView extends WatchUi.View {
 
     // Menu items
     private var _items as Array<Dictionary>;
-    private var _focusIndex as Number = 0;
     private var _scrollOffset as Number = 0;  // pixels scrolled up
 
     // Layout constants
-    private const TITLE_H = 70;
-    private const ITEM_H = 70;
-    private const DOCK_H = 80;
+    private const TITLE_H = 60;
+    private const ITEM_H = 80;
+    private const DOCK_H = 110;
     private const ITEM_COUNT = 4;
 
     function initialize(service as IPodcastService) {
@@ -61,14 +60,14 @@ class HomeMenuView extends WatchUi.View {
         }
 
         // --- Menu items (scroll, clipped above dock) ---
+        dc.setClip(0, 0, w, dockY);
         var itemsStartY = TITLE_H - _scrollOffset;
         for (var i = 0; i < _items.size(); i++) {
             var itemY = itemsStartY + i * ITEM_H;
-            // Skip items fully above or below visible area
             if (itemY + ITEM_H < 0 || itemY >= dockY) { continue; }
-            var focused = (i == _focusIndex);
-            drawMenuItem(dc, _items[i], itemY, ITEM_H, w, focused);
+            drawMenuItem(dc, _items[i], itemY, ITEM_H, w);
         }
+        dc.clearClip();
 
         // --- Now Playing dock (fixed at bottom, drawn last) ---
         drawNowPlayingDock(dc, dockY, DOCK_H, w);
@@ -76,24 +75,15 @@ class HomeMenuView extends WatchUi.View {
 
     //! Draw a single menu item pill
     private function drawMenuItem(dc as Graphics.Dc, item as Dictionary,
-                                   y as Number, h as Number, w as Number,
-                                   focused as Boolean) as Void {
-        var marginX = focused ? 12 : 20;
-        var marginY = 3;
+                                   y as Number, h as Number, w as Number) as Void {
+        var marginX = 20;
+        var marginY = 5;
         var itemW = w - 2 * marginX;
         var itemH = h - 2 * marginY;
-        var radius = 14;
+        var radius = 16;
 
-        var bgColor = focused ? 0x2A2A4E : 0x1A1A2E;
-        dc.setColor(bgColor, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
         dc.fillRoundedRectangle(marginX, y + marginY, itemW, itemH, radius);
-
-        if (focused) {
-            dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-            dc.setPenWidth(2);
-            dc.drawRoundedRectangle(marginX, y + marginY, itemW, itemH, radius);
-            dc.setPenWidth(1);
-        }
 
         // Icon
         var iconX = marginX + 16;
@@ -130,69 +120,106 @@ class HomeMenuView extends WatchUi.View {
     //! Draw the fixed Now Playing dock at the bottom
     private function drawNowPlayingDock(dc as Graphics.Dc, y as Number,
                                          h as Number, w as Number) as Void {
-        // Dark background
+        var screenH = System.getDeviceSettings().screenHeight;
+        var cx = w / 2;
+        var r = w / 2;  // radius for round display
+
+        // Dark background for dock area
         dc.setColor(0x0A0A14, Graphics.COLOR_TRANSPARENT);
         dc.fillRectangle(0, y, w, h);
 
-        // Separator
-        dc.setColor(0x333344, Graphics.COLOR_TRANSPARENT);
-        dc.drawLine(40, y, w - 40, y);
-
-        var cx = w / 2;
-        var cy = y + h / 2;
+        // Thin separator line with glow effect
+        dc.setColor(0x2244AA, Graphics.COLOR_TRANSPARENT);
+        dc.fillRectangle(50, y, w - 100, 2);
+        dc.setColor(0x112244, Graphics.COLOR_TRANSPARENT);
+        dc.fillRectangle(50, y + 2, w - 100, 1);
 
         if (!PlaybackState.hasActivePlayback()) {
-            // Idle — play triangle + label
-            dc.setColor(0x333355, Graphics.COLOR_TRANSPARENT);
-            dc.fillPolygon([[cx - 6, cy - 8], [cx - 6, cy + 8], [cx + 6, cy]]);
-            dc.setColor(0x555577, Graphics.COLOR_TRANSPARENT);
-            dc.drawText(cx, cy + 12, Graphics.FONT_XTINY,
-                        "Now Playing", Graphics.TEXT_JUSTIFY_CENTER);
+            // Idle — outline arc with "Now Playing" label
+            dc.setColor(0x888899, Graphics.COLOR_TRANSPARENT);
+            dc.drawText(cx, y + 16, Graphics.FONT_XTINY,
+                        "No episode playing", Graphics.TEXT_JUSTIFY_CENTER);
+            // Outline arc + play icon
+            _drawArcOutline(dc, cx, screenH, r, 0x444466);
+            var idleIconY = screenH - 22;
+            dc.setColor(0x444466, Graphics.COLOR_TRANSPARENT);
+            dc.fillPolygon([[cx - 7, idleIconY - 9], [cx - 7, idleIconY + 9], [cx + 9, idleIconY]]);
             return;
         }
 
-        // Active playback
-        var iconCX = 50;
-        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        if (PlaybackState.isPlaying) {
-            dc.fillRectangle(iconCX - 6, cy - 7, 4, 14);
-            dc.fillRectangle(iconCX + 2, cy - 7, 4, 14);
-        } else {
-            dc.fillPolygon([[iconCX - 5, cy - 7], [iconCX - 5, cy + 7], [iconCX + 7, cy]]);
-        }
+        // --- Active playback ---
 
-        var textX = 70;
-        var maxTextW = w - textX - 20;
-
+        // Episode title (centered, tight to separator)
+        var titleY = y + 4;
+        var maxTextW = w - 140;
+        var fontH = dc.getFontHeight(Graphics.FONT_XTINY);
         dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(textX, y + 10, Graphics.FONT_XTINY,
+        dc.drawText(cx, titleY, Graphics.FONT_XTINY,
                     DataFormat.truncateText(dc, PlaybackState.currentTitle, Graphics.FONT_XTINY, maxTextW),
-                    Graphics.TEXT_JUSTIFY_LEFT);
+                    Graphics.TEXT_JUSTIFY_CENTER);
 
+        // Podcast name + position (spaced by full font height + gap)
         var position = PlaybackState.getEstimatedPosition();
         var duration = PlaybackState.currentDuration;
         var subText = PlaybackState.currentPodcastTitle;
         if (duration > 0) {
             subText = subText + " · " + DataFormat.formatTime(position);
         }
+        var subY = titleY + fontH + 2;
         dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(textX, y + 30, Graphics.FONT_XTINY,
+        dc.drawText(cx, subY, Graphics.FONT_XTINY,
                     DataFormat.truncateText(dc, subText, Graphics.FONT_XTINY, maxTextW),
-                    Graphics.TEXT_JUSTIFY_LEFT);
+                    Graphics.TEXT_JUSTIFY_CENTER);
 
-        // Mini progress bar
-        var barY = y + 52;
-        dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
-        dc.fillRoundedRectangle(textX, barY, maxTextW, 3, 1);
+        // Progress bar (full available width, below subtitle with gap)
+        var barY = subY + fontH + 4;
+        var dy = barY - cx;
+        var rSq = r * r;
+        var dySq = dy * dy;
+        var halfChord = 100;  // fallback
+        if (dySq < rSq) {
+            halfChord = Math.sqrt(rSq - dySq).toNumber() - 8;
+        }
+        var barX = cx - halfChord;
+        var barW = halfChord * 2;
+        dc.setColor(0x444444, Graphics.COLOR_TRANSPARENT);
+        dc.fillRoundedRectangle(barX, barY, barW, 4, 2);
         if (duration > 0 && position > 0) {
             var progress = position.toFloat() / duration.toFloat();
             if (progress > 1.0) { progress = 1.0; }
-            var fillW = (maxTextW * progress).toNumber();
+            var fillW = (barW * progress).toNumber();
             if (fillW > 0) {
                 dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-                dc.fillRoundedRectangle(textX, barY, fillW, 3, 1);
+                dc.fillRoundedRectangle(barX, barY, fillW, 4, 2);
             }
         }
+
+        // Arc play/pause button at the very bottom (Garmin-style outline only)
+        // drawArc clockwise from 315° (bottom-right) to 225° (bottom-left) = bottom 90°
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        dc.drawArc(cx, cx, r - 2, Graphics.ARC_CLOCKWISE, 315, 225);
+        dc.setPenWidth(1);
+
+        // Play/pause icon centered below the arc line
+        var iconY = screenH - 20;
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        if (PlaybackState.isPlaying) {
+            dc.fillRectangle(cx - 8, iconY - 8, 5, 16);
+            dc.fillRectangle(cx + 3, iconY - 8, 5, 16);
+        } else {
+            dc.fillPolygon([[cx - 7, iconY - 9], [cx - 7, iconY + 9], [cx + 9, iconY]]);
+        }
+    }
+
+    //! Draw a Garmin-style arc outline at the bottom of the round screen (idle state)
+    private function _drawArcOutline(dc as Graphics.Dc, cx as Number,
+                                       screenH as Number, r as Number,
+                                       color as Number) as Void {
+        dc.setColor(color, Graphics.COLOR_TRANSPARENT);
+        dc.setPenWidth(2);
+        dc.drawArc(cx, cx, r - 2, Graphics.ARC_CLOCKWISE, 315, 225);
+        dc.setPenWidth(1);
     }
 
     //! Build subtitle for a menu item
@@ -255,43 +282,26 @@ class HomeMenuView extends WatchUi.View {
         }
     }
 
-    // --- Focus management (called by delegate) ---
+    // --- Scroll management (called by delegate) ---
 
-    function moveFocus(delta as Number) as Void {
-        _focusIndex = _focusIndex + delta;
-        if (_focusIndex < 0) { _focusIndex = _items.size() - 1; }
-        if (_focusIndex >= _items.size()) { _focusIndex = 0; }
-        ensureFocusVisible();
+    //! Scroll the list by a number of pixels
+    function scroll(deltaPixels as Number) as Void {
+        _scrollOffset = _scrollOffset + deltaPixels;
+        clampScroll();
         WatchUi.requestUpdate();
     }
 
-    //! Adjust scroll so the focused item is fully visible between title and dock
-    private function ensureFocusVisible() as Void {
+    //! Clamp scroll offset to valid range
+    private function clampScroll() as Void {
         var screenH = System.getDeviceSettings().screenHeight;
         var dockY = screenH - DOCK_H;
-
-        // Item's absolute position (before scroll)
-        var itemAbsTop = TITLE_H + _focusIndex * ITEM_H;
-        var itemAbsBottom = itemAbsTop + ITEM_H;
-
-        // Ensure bottom of focused item is above dock
-        if (itemAbsBottom - _scrollOffset > dockY) {
-            _scrollOffset = itemAbsBottom - dockY;
-        }
-        // Ensure top of focused item is below screen top (with some title room)
-        if (itemAbsTop - _scrollOffset < 30) {
-            _scrollOffset = itemAbsTop - 30;
-        }
-        // Don't scroll negative
+        // Total content height = title + all items
+        var contentH = TITLE_H + _items.size() * ITEM_H;
+        // Max scroll: last item's bottom aligns with dock top
+        var maxScroll = contentH - dockY;
+        if (maxScroll < 0) { maxScroll = 0; }
+        if (_scrollOffset > maxScroll) { _scrollOffset = maxScroll; }
         if (_scrollOffset < 0) { _scrollOffset = 0; }
-    }
-
-    function getSelectedId() as Symbol {
-        return _items[_focusIndex]["id"] as Symbol;
-    }
-
-    function getFocusIndex() as Number {
-        return _focusIndex;
     }
 
     function onShow() as Void {
@@ -322,7 +332,7 @@ class HomeMenuView extends WatchUi.View {
 
     //! Hit-test: which item index is at screen Y? Returns -1 if none.
     function itemIndexAtY(y as Number) as Number {
-        var itemsStartY = TITLE_H;
+        var itemsStartY = TITLE_H - _scrollOffset;
         for (var i = 0; i < _items.size(); i++) {
             var top = itemsStartY + i * ITEM_H;
             if (y >= top && y < top + ITEM_H) {
@@ -330,6 +340,11 @@ class HomeMenuView extends WatchUi.View {
             }
         }
         return -1;
+    }
+
+    //! Get the item ID for a given index
+    function getItemId(index as Number) as Symbol {
+        return _items[index]["id"] as Symbol;
     }
 }
 
@@ -348,47 +363,46 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
         _service = service;
     }
 
-    //! Up/down scrolling via buttons or crown
+    //! Up/down scrolling via buttons or crown — scroll by one item height
     function onNextPage() as Boolean {
-        _view.moveFocus(1);
+        _view.scroll(50);
         return true;
     }
 
     function onPreviousPage() as Boolean {
-        _view.moveFocus(-1);
+        _view.scroll(-50);
         return true;
     }
 
-    //! Select focused item via tap or button press
+    //! Select fires for both button press AND screen tap on Garmin.
+    //! We return false to let onTap handle touch events with coordinates.
     function onSelect() as Boolean {
-        var id = _view.getSelectedId();
-        System.println("YoCasts: HomeMenu select — id=" + id);
-        navigateTo(id);
-        return true;
+        System.println("YoCasts: HomeMenu onSelect (ignored — onTap handles taps)");
+        return false;
     }
 
-    //! Handle screen tap — tap on item or dock
+    //! Handle screen tap — tap on item navigates directly
     function onTap(evt as WatchUi.ClickEvent) as Boolean {
         var coords = evt.getCoordinates();
+        var x = coords[0];
         var y = coords[1];
+        System.println("YoCasts: HomeMenu onTap at (" + x + ", " + y + ")");
 
-        // Dock area tap
+        // Dock area tap — toggle play/pause
         if (y >= _view.getDockY()) {
-            System.println("YoCasts: HomeMenu dock tapped");
-            navigateToNowPlaying();
+            System.println("YoCasts: HomeMenu dock tapped — toggling play/pause");
+            PlaybackState.isPlaying = !PlaybackState.isPlaying;
+            WatchUi.requestUpdate();
             return true;
         }
 
-        // Item area tap
+        // Item area tap — navigate directly to tapped item
         var idx = _view.itemIndexAtY(y);
+        System.println("YoCasts: HomeMenu tap hit-test → idx=" + idx);
         if (idx >= 0) {
-            _view.moveFocus(0); // no-op but could set focus
-            var items = [":queue", ":podcasts", ":downloads", ":settings"];
-            System.println("YoCasts: HomeMenu tap on item " + idx);
-            if (idx == 0) { navigateTo(:queue); }
-            else if (idx == 1) { navigateTo(:podcasts); }
-            else if (idx == 2) { navigateTo(:downloads); }
-            else if (idx == 3) { navigateTo(:settings); }
+            var id = _view.getItemId(idx);
+            System.println("YoCasts: HomeMenu tap → navigating to " + id);
+            navigateTo(id);
             return true;
         }
 

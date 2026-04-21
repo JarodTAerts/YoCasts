@@ -405,6 +405,15 @@ class PocketCastsPodcastService extends IPodcastService {
                 // Update now playing if first queue item
                 if (_queueEnrichIndex == 0) {
                     _nowPlaying = ep;
+                    // Seed PlaybackState so the Home dock shows the current episode
+                    var epUuid = ep.get(DataKeys.E_UUID) as String;
+                    var epPodUuid = ep.get(DataKeys.E_PODCAST_UUID) as String;
+                    var epTitle = ep.get(DataKeys.E_TITLE) as String;
+                    var epPodTitle = ep.get(DataKeys.E_PODCAST_TITLE) as String;
+                    var epPos = ep.get(DataKeys.E_PLAYED_UP_TO) as Number;
+                    var epDur = ep.get(DataKeys.E_DURATION) as Number;
+                    System.println("YoCasts: seeding PlaybackState from queue[0]: '" + epTitle + "' pos=" + epPos + " dur=" + epDur);
+                    PlaybackState.update(epUuid, epPodUuid, epTitle, epPodTitle, epPos, epDur, false);
                 }
             }
         } else if (responseCode == 401) {
