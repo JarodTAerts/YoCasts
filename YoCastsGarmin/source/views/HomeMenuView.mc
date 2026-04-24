@@ -388,11 +388,21 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
         var y = coords[1];
         System.println("YoCasts: HomeMenu onTap at (" + x + ", " + y + ")");
 
-        // Dock area tap — toggle play/pause
-        if (y >= _view.getDockY()) {
-            System.println("YoCasts: HomeMenu dock tapped — toggling play/pause");
-            PlaybackState.isPlaying = !PlaybackState.isPlaying;
-            WatchUi.requestUpdate();
+        // Dock area tap — split into info zone (top) and arc button zone (bottom)
+        var dockY = _view.getDockY();
+        var screenH = System.getDeviceSettings().screenHeight;
+        var arcZoneY = screenH - 40;  // bottom 40px is the play/pause arc button
+        if (y >= dockY) {
+            if (y >= arcZoneY) {
+                // Arc button zone — toggle play/pause
+                System.println("YoCasts: HomeMenu dock arc tapped — toggling play/pause");
+                PlaybackState.isPlaying = !PlaybackState.isPlaying;
+                WatchUi.requestUpdate();
+            } else {
+                // Info zone — open NowPlaying screen
+                System.println("YoCasts: HomeMenu dock info tapped — opening NowPlaying");
+                navigateToNowPlaying();
+            }
             return true;
         }
 
@@ -418,11 +428,11 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
         if (id == :queue) {
             System.println("YoCasts: HomeMenu → Queue");
             var queueView = new QueueView(_service);
-            WatchUi.pushView(queueView, new QueueDelegate(_service), WatchUi.SLIDE_UP);
+            WatchUi.pushView(queueView, new QueueDelegate(queueView, _service), WatchUi.SLIDE_UP);
         } else if (id == :podcasts) {
             System.println("YoCasts: HomeMenu → Podcasts");
             var podView = new SubscribedView(_service);
-            WatchUi.pushView(podView, new SubscribedDelegate(_service), WatchUi.SLIDE_UP);
+            WatchUi.pushView(podView, new SubscribedDelegate(podView, _service), WatchUi.SLIDE_UP);
         } else if (id == :downloads) {
             System.println("YoCasts: HomeMenu → Downloads");
             var dlView = new DownloadsView();

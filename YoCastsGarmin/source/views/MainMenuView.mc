@@ -17,10 +17,10 @@ class MainMenuDelegate extends WatchUi.Menu2InputDelegate {
         var id = item.getId();
         if (id == :queue) {
             var queueView = new QueueView(_service);
-            WatchUi.pushView(queueView, new QueueDelegate(_service), WatchUi.SLIDE_UP);
+            WatchUi.pushView(queueView, new QueueDelegate(queueView, _service), WatchUi.SLIDE_UP);
         } else if (id == :podcasts) {
             var podView = new SubscribedView(_service);
-            WatchUi.pushView(podView, new SubscribedDelegate(_service), WatchUi.SLIDE_UP);
+            WatchUi.pushView(podView, new SubscribedDelegate(podView, _service), WatchUi.SLIDE_UP);
         } else if (id == :nowPlaying) {
             var ep = _service.getNowPlaying();
             if (ep != null) {
