@@ -239,22 +239,3 @@ class SubscribedDelegate extends WatchUi.BehaviorDelegate {
     }
 }
 
-//! Simple empty-state item for CustomMenu (used by QueueView)
-class EmptyStateMenuItem extends WatchUi.CustomMenuItem {
-
-    private var _text as String;
-
-    function initialize(text as String) {
-        CustomMenuItem.initialize(:empty, {});
-        _text = text;
-    }
-
-    function draw(dc as Graphics.Dc) as Void {
-        var w = dc.getWidth();
-        var h = dc.getHeight();
-        dc.setColor(Graphics.COLOR_LT_GRAY, Graphics.COLOR_BLACK);
-        dc.clear();
-        dc.drawText(w / 2, h / 2 - dc.getFontHeight(Graphics.FONT_TINY) / 2,
-                    Graphics.FONT_TINY, _text, Graphics.TEXT_JUSTIFY_CENTER);
-    }
-}
