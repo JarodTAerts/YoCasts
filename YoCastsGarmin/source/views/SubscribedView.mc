@@ -228,7 +228,7 @@ class SubscribedDelegate extends WatchUi.BehaviorDelegate {
 
         var episodeView = new EpisodeListView(_service, podcastUuid, podcastTitle);
         WatchUi.pushView(episodeView,
-                         new EpisodeListDelegate(_service, podcastUuid),
+                         new EpisodeListDelegate(episodeView, _service, podcastUuid),
                          WatchUi.SLIDE_UP);
         return true;
     }
