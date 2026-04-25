@@ -40,12 +40,30 @@ class PocketCastsPodcastService extends IPodcastService {
     // ---- Queue Enrichment Pipeline State ----
     private var _queueEnrichIndex as Number = 0;
 
+    // ---- Token Refresh Serialization ----
+    // Prevents concurrent token-refresh + API request (CIQ -402 race condition).
+    // When a refresh is in-flight, the API call is queued and replayed after
+    // the refresh completes with the new token.
+    private var _tokenRefreshInProgress as Boolean = false;
+    private var _pendingRequestPath as String = "";
+    private var _pendingRequestBody as Dictionary<Object, Object>? = null;
+    private var _pendingRequestCallback as Method? = null;
+
     // ---- Episode Fetch Pipeline State ----
     private var _pendingEpPodcastUuid as String = "";
     private var _pendingEpUserState as Array<Dictionary> = [] as Array<Dictionary>;
     private var _pendingEpDetails as Array<Dictionary> = [] as Array<Dictionary>;
     private var _pendingEpIndex as Number = 0;
     private var _episodeFetchBusy as Boolean = false;
+    private var _episodeRetried as Boolean = false;
+
+    // ---- Token Refresh Queuing ----
+    // Prevents concurrent HTTP requests when token refresh is needed.
+    // _makeAuthPost queues the API request and fires it AFTER refresh completes.
+    private var _tokenRefreshBusy as Boolean = false;
+    private var _pendingReqPath as String = "";
+    private var _pendingReqBody as Dictionary = {} as Dictionary;
+    private var _pendingReqCallback as Method?;
 
     // ---- Constants ----
     // Direct PocketCasts API — used ONLY for login and token refresh
@@ -73,6 +91,10 @@ class PocketCastsPodcastService extends IPodcastService {
 
     function isAuthenticated() as Boolean {
         return _authenticated;
+    }
+
+    function getAccessToken() as String {
+        return _accessToken;
     }
 
     function isDataReady() as Boolean {
@@ -191,6 +213,7 @@ class PocketCastsPodcastService extends IPodcastService {
     }
 
     private function _doTokenRefresh() as Void {
+        _tokenRefreshInProgress = true;
         System.println("YoCasts: POST /user/token (refresh)");
         Communications.makeWebRequest(
             API_BASE + "/user/token",
@@ -211,6 +234,8 @@ class PocketCastsPodcastService extends IPodcastService {
 
     //! @hide
     function onRefreshResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
+        _tokenRefreshInProgress = false;
+
         if (responseCode == 200 && data != null && data instanceof Dictionary) {
             var dict = data as Dictionary;
             var at = dict.get("accessToken");
@@ -232,6 +257,9 @@ class PocketCastsPodcastService extends IPodcastService {
             _authenticated = false;
             System.println("YoCasts: token refresh FAILED — HTTP " + responseCode + ", will re-login");
         }
+
+        // Replay the queued API request now that the token is updated
+        _replayPendingRequest();
     }
 
     // ================================================================
@@ -447,6 +475,7 @@ class PocketCastsPodcastService extends IPodcastService {
                     _pendingEpUserState.add(arr[i] as Dictionary);
                 }
                 System.println("YoCasts: episode list returned " + _pendingEpUserState.size() + " items, fetching details");
+                _episodeRetried = false;
 
                 _pendingEpDetails = [] as Array<Dictionary>;
                 _pendingEpIndex = 0;
@@ -457,7 +486,15 @@ class PocketCastsPodcastService extends IPodcastService {
         // Fetch failed
         _episodeFetchBusy = false;
         if (responseCode == 401) {
-            System.println("YoCasts: episode list 401 — token may be expired");
+            if (!_episodeRetried) {
+                // Token was likely stale when request fired — retry once with fresh token
+                System.println("YoCasts: episode list 401 — retrying with refreshed token");
+                _episodeRetried = true;
+                requestEpisodesForPodcast(_pendingEpPodcastUuid);
+                return;
+            }
+            _episodeRetried = false;
+            System.println("YoCasts: episode list 401 — retry also failed, giving up");
         } else {
             System.println("YoCasts: episode list FAILED — HTTP " + responseCode);
         }
@@ -518,11 +555,29 @@ class PocketCastsPodcastService extends IPodcastService {
 
     //! Make an authenticated POST request through the Azure proxy with Bearer token.
     //! All data-fetching calls go through the proxy; login/token refresh go direct.
+    //!
+    //! Token refresh serialization: if a refresh is needed, the API request is
+    //! queued and deferred until the refresh completes. This prevents concurrent
+    //! makeWebRequest() calls that trigger CIQ -402 (NETWORK_RESPONSE_TOO_LARGE).
     private function _makeAuthPost(path as String, body as Dictionary<Object, Object>,
                                     callback as Method(responseCode as Number, data as Dictionary or String or Null) as Void) as Void {
-        // Proactive token refresh
+        // If a token refresh is already in-flight, queue this request
+        if (_tokenRefreshInProgress) {
+            System.println("YoCasts: token refresh in progress — queueing " + path);
+            _pendingRequestPath = path;
+            _pendingRequestBody = body;
+            _pendingRequestCallback = callback;
+            return;
+        }
+
+        // Proactive token refresh — defer the API call until refresh completes
         if (_isTokenExpiringSoon()) {
+            System.println("YoCasts: token expiring soon — deferring " + path + " until refresh");
+            _pendingRequestPath = path;
+            _pendingRequestBody = body;
+            _pendingRequestCallback = callback;
             _doTokenRefresh();
+            return;
         }
 
         Communications.makeWebRequest(
@@ -538,6 +593,25 @@ class PocketCastsPodcastService extends IPodcastService {
             },
             callback
         );
+    }
+
+    //! Replay a queued API request after token refresh completes.
+    //! If no request is queued, this is a no-op.
+    private function _replayPendingRequest() as Void {
+        if (_pendingRequestCallback == null) {
+            return;
+        }
+        var path = _pendingRequestPath;
+        var body = _pendingRequestBody as Dictionary<Object, Object>;
+        var cb = _pendingRequestCallback as Method(responseCode as Number, data as Dictionary or String or Null) as Void;
+
+        // Clear queued state before firing to avoid infinite loops
+        _pendingRequestPath = "";
+        _pendingRequestBody = null;
+        _pendingRequestCallback = null;
+
+        System.println("YoCasts: replaying deferred request " + path);
+        _makeAuthPost(path, body, cb);
     }
 
     //! Mark data as ready and request UI update
