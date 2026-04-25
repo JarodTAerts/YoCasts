@@ -57,14 +57,6 @@ class PocketCastsPodcastService extends IPodcastService {
     private var _episodeFetchBusy as Boolean = false;
     private var _episodeRetried as Boolean = false;
 
-    // ---- Token Refresh Queuing ----
-    // Prevents concurrent HTTP requests when token refresh is needed.
-    // _makeAuthPost queues the API request and fires it AFTER refresh completes.
-    private var _tokenRefreshBusy as Boolean = false;
-    private var _pendingReqPath as String = "";
-    private var _pendingReqBody as Dictionary = {} as Dictionary;
-    private var _pendingReqCallback as Method?;
-
     // ---- Constants ----
     // Direct PocketCasts API — used ONLY for login and token refresh
     private const API_BASE = "https://api.pocketcasts.com";
@@ -448,6 +440,11 @@ class PocketCastsPodcastService extends IPodcastService {
             System.println("YoCasts: queue enrich 401 — stopping enrichment");
             WatchUi.requestUpdate();
             return;
+        } else if (responseCode == -402) {
+            // CIQ concurrent request limit — stop enrichment, keep what we have
+            System.println("YoCasts: queue enrich -402 (too many requests) — stopping enrichment");
+            WatchUi.requestUpdate();
+            return;
         } else {
             System.println("YoCasts: queue enrich failed for item " + _queueEnrichIndex + " — HTTP " + responseCode);
         }
@@ -495,6 +492,9 @@ class PocketCastsPodcastService extends IPodcastService {
             }
             _episodeRetried = false;
             System.println("YoCasts: episode list 401 — retry also failed, giving up");
+        } else if (responseCode == -402) {
+            // CIQ concurrent request limit hit — reset so next onUpdate cycle retries
+            System.println("YoCasts: episode list -402 (too many requests) — will retry on next cycle");
         } else {
             System.println("YoCasts: episode list FAILED — HTTP " + responseCode);
         }
@@ -537,6 +537,15 @@ class PocketCastsPodcastService extends IPodcastService {
         } else if (responseCode == 401) {
             System.println("YoCasts: episode detail 401 — stopping fetch pipeline");
             // Save what we have so far
+            if (_pendingEpDetails.size() > 0) {
+                _episodes.put(_pendingEpPodcastUuid, _pendingEpDetails);
+            }
+            _episodeFetchBusy = false;
+            WatchUi.requestUpdate();
+            return;
+        } else if (responseCode == -402) {
+            // CIQ concurrent request limit — save partial results and let next cycle retry
+            System.println("YoCasts: episode detail -402 (too many requests) — saving " + _pendingEpDetails.size() + " partial results");
             if (_pendingEpDetails.size() > 0) {
                 _episodes.put(_pendingEpPodcastUuid, _pendingEpDetails);
             }
