@@ -1296,3 +1296,256 @@ Requires `PersistedContent` permission in manifest.
 
 Phase C audio download pipeline complete and ready for hardware integration testing. Prerequisite: Background permission + Venu 4 hardware (Mal's gating conditions met). No additional API changes needed from Wash — proxy already provides audio URLs.
 
+
+
+---
+
+# Decision: Brand Color Brightening Strategy
+
+**Author:** Kaylee (Garmin Dev)
+**Date:** 2026-04-19
+**Status:** Applied
+
+## Context
+
+PocketCasts proxy returns `artColor` and `artTint` hex strings per podcast. The `artColor` values represent the dominant dark color from artwork — many are extremely dark (e.g., `#1d2b38` = RGB 29,43,56). When used with the original `dimColor()` at 10–35% factor for AMOLED backgrounds, the resulting RGB values (e.g., 5,8,11) were invisible against the black Menu2 background.
+
+## Decision
+
+Added `DataFormat.brightenColor(color, targetMax)` — a hue-preserving proportional scaler that boosts a color so its brightest channel reaches `targetMax`. Applied throughout all CustomMenuItem subclasses:
+
+| Element | Before | After |
+|---------|--------|-------|
+| Background (unfocused) | dimColor @ 0.10–0.20 | brighten(80) then dim @ 0.25–0.35 |
+| Background (focused) | dimColor @ 0.22–0.35 | brighten(80) then dim @ 0.50–0.60 |
+| Circles/dots | raw brandColor | brighten(140–160) |
+| Accent bars | raw brandColor | brighten(160) |
+| Title text | tintColor (unchanged) | tintColor (unchanged) |
+
+Also added explicit `{:height => 80}` to all `CustomMenuItem.initialize()` calls as a safety measure — omitting the height option may prevent `draw()` from being called in certain CIQ SDK versions.
+
+## Impact
+
+- **Wash (Proxy Dev):** No changes needed — proxy artColor/artTint format is correct.
+- **Team:** If we add new CustomMenuItem subclasses in future views, always pass `{:height => N}` and use `brightenColor()` for any artColor-derived visual elements.
+
+
+---
+
+# Brand Color Tinting Extended to All Views
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-07-15  
+**Affects:** Mal (Lead), all agents
+
+## Decision
+
+Extended podcast brand color tinting from the three CustomMenu list views (QueueView, SubscribedView, EpisodeListView) to the two remaining custom Views:
+
+1. **DownloadsView** — pill backgrounds, selection borders, title text, progress bars, and subtitle text now use the parent podcast's artColor/artTint via `DataFormat.lookupPodcastColors()`. Status indicator colors (green/red/blue) kept as-is for semantic clarity.
+
+2. **NowPlayingView** — progress arc, play/pause button, skip button backgrounds/icons, podcast name text, and a subtle background wash all use brand colors. The episode title stays white for maximum readability.
+
+**Pattern used:** `CacheManager.loadPodcasts()` for the podcast list (no service reference needed), `DataFormat.lookupPodcastColors()` for lookup, `brightenColor()` + `dimColor()` for tinting, `ensureContrast()` for text legibility.
+
+## Podcast Art Status
+
+artUrl values confirmed present in podcast dicts. Implementation plan for `Communications.makeImageRequest()` thumbnails documented as comments in SubscribedView's `PodcastMenuItem.draw()`. Memory budget: ~64KB for 10 cached 40x40 images. Not yet implemented — needs a dedicated pass with phone-connected testing.
+
+## Build Status
+
+Build passes at `-l 3` (strict) on Venu 4 41mm target.
+
+
+---
+
+# CustomMenuItem Requires CustomMenu, Not Menu2
+
+**By:** Kaylee (Garmin Dev)
+**Date:** 2026-07-15
+**Affects:** All agents working on Garmin views
+
+## Problem
+
+`CustomMenuItem.draw()` was never called by the CIQ runtime. All three list screens (Podcasts, Queue, Episodes) showed plain text labels instead of custom-drawn items with brand colors, initial circles, accent bars, and author subtitles.
+
+## Root Cause
+
+**CustomMenuItem is designed for CustomMenu, not Menu2.** The Garmin CIQ API docs explicitly state:
+
+> "A CustomMenuItem is a element of a CustomMenu View"
+> "A CustomMenuItem can be added to a CustomMenu using the addItem() method"
+
+`CustomMenu` extends `Menu2` but adds the custom rendering pipeline that calls `draw()`. When CustomMenuItems are added to a plain `Menu2`, it ignores their draw() override and falls back to rendering the label text from `setLabel()`.
+
+## Fix Applied
+
+Converted all three list views from `extends WatchUi.Menu2` to `extends WatchUi.CustomMenu`:
+
+- **SubscribedView** — podcasts list
+- **QueueView** — up next episodes
+- **EpisodeListView** — episodes per podcast
+
+Key API differences:
+| | Menu2 | CustomMenu |
+|---|---|---|
+| Initialize | `Menu2.initialize({:title => "Text"})` | `CustomMenu.initialize(80, Graphics.COLOR_BLACK, {:titleItemHeight => 50})` |
+| Title | String passed in options | Override `drawTitle(dc)` method |
+| Item height | Per-item `{:height => N}` (not in API) | Menu-level `itemHeight` param |
+| addItem() accepts | MenuItem | CustomMenuItem |
+| draw() called? | ❌ No | ✅ Yes |
+
+## Impact
+
+- All CustomMenuItem subclasses (PodcastMenuItem, QueueEpisodeMenuItem, EpisodeMenuItem) now have their `draw()` method invoked
+- Empty/loading states use new `EmptyStateMenuItem` (extends CustomMenuItem) since CustomMenu.addItem() only accepts CustomMenuItem
+- `Menu2InputDelegate` still works as the delegate for CustomMenu (it extends Menu2)
+- Build passes `-l 3` strict
+
+## Decision
+
+**All future CIQ list screens that need custom rendering MUST use `CustomMenu`, not `Menu2`.** Use plain `Menu2` only for simple text-only menus (like the episode action menu with Play/Download options).
+
+
+---
+
+# Episode Detail View — Navigation Flow Change
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-07-16  
+**Affects:** Mal (Lead), all agents
+
+## Decision
+
+Changed the episode selection navigation flow from a simple Menu2 action menu to a full-screen Episode Detail View.
+
+**OLD flow:** EpisodeListView → tap episode → Menu2 with "Play" / "Download" options  
+**NEW flow:** EpisodeListView → tap episode → EpisodeDetailView (full info) → tap Play or Download button
+
+## What Changed
+
+1. **Created `EpisodeDetailView.mc`** — Custom `WatchUi.View` + `InputDelegate` pair showing:
+   - Podcast name (brand-tinted), episode title (marquee), duration/progress with progress bar, download status (color-coded), play status, and two circular action buttons (Play + Download).
+
+2. **Modified `EpisodeListView.mc`** — `EpisodeListDelegate.onSelect()` now pushes `EpisodeDetailView` instead of creating a Menu2. Removed `showEpisodeActionMenu()` and `EpisodeActionDelegate` (dead code).
+
+3. **Navigation preserved** — Back (swipe right / ESC) pops the detail view. SELECT physical button maps to Play. All existing play+download logic ported from the old action delegate.
+
+## Rationale
+
+- Full layout control for the 390×390 AMOLED display (Menu2 is too constrained)
+- Shows episode context (duration, status, download state) before requiring user action
+- Consistent design language with NowPlayingView and DownloadsView (brand-tinted, circular buttons, InputDelegate for tap hit-testing)
+- Matches Garmin UX patterns (Spotify, native music player show detail before playback)
+
+## Technical Notes
+
+- `const` in Monkey C classes can't be accessed statically across classes — delegate uses hardcoded button coordinates (same pattern as NowPlayingDelegate)
+- Brand colors loaded via `CacheManager.loadPodcasts()` + `DataFormat.lookupPodcastColors()` (no service reference needed)
+- Build passes `-l 3` strict linting
+
+
+---
+
+# HomeMenuView Rewritten to CustomMenu
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-07-15  
+**Affects:** All agents (UI architecture change)
+
+## Decision
+
+Rewrote HomeMenuView from a manual `WatchUi.View` with hand-rolled scrolling to `WatchUi.CustomMenu` with native smooth scrolling. This is a significant architectural change to the app's primary screen.
+
+## Approach Chosen: Full CustomMenu (Option A)
+
+Evaluated three options:
+1. **Option A (chosen):** Full CustomMenu — all nav items + Now Playing as CustomMenuItems
+2. **Option B:** Keep View, improve scroll physics — less disruptive but still manual
+3. **Option C:** Hybrid CustomMenu with overlay dock — hacky, and Menu2InputDelegate can't handle raw taps for the dock area
+
+Option A was chosen because:
+- Native smooth scrolling matches the Podcasts/Queue/Episodes lists
+- Menu2InputDelegate handles item selection cleanly (no coordinate math)
+- CustomMenu handles focus states, physical button navigation, and touch natively
+- The Now Playing dock becomes a compact card item — tapping it opens the full NowPlayingView
+
+## What Changed
+
+- `HomeMenuView` now extends `WatchUi.CustomMenu` (was `WatchUi.View`)
+- `HomeMenuDelegate` now extends `WatchUi.Menu2InputDelegate` (was `WatchUi.InputDelegate`)
+- Now Playing is a `NowPlayingMenuItem` (CustomMenuItem) reading from `PlaybackState` module
+- Marquee animation removed — replaced with `DataFormat.truncateText()` (consistent with all other list views)
+- Constructor signatures unchanged — no caller modifications needed
+
+## Trade-offs
+
+- Now Playing is no longer a fixed dock — it's the 5th item in the scrollable list. With 4 nav items (320px) + title (50px) = 370px on 390px screen, there's minimal scrolling needed and the NowPlaying card is always close to visible.
+- Marquee animation for long text is gone — truncated with "..." instead. The full NowPlayingView shows complete text.
+
+
+---
+
+# List View Rounded Pill Redesign
+
+**By:** Kaylee (Garmin Dev)
+**Date:** 2026-07-15
+**Affects:** All agents (UI pattern)
+
+## Decision
+
+All CustomMenu list views (Subscribed Podcasts, Queue, Episode List) now use **rounded pill-shaped items** instead of edge-to-edge flat rectangles. This is the standard layout pattern going forward for any new CustomMenu screens.
+
+## Design Constants
+
+- **Horizontal margin:** 20px unfocused, 12px focused (expansion effect)
+- **Vertical margin:** 4px top and bottom
+- **Corner radius:** 14px
+- **Background:** True AMOLED black (`COLOR_BLACK`) outside pills
+- **Focus indicator:** Bright `drawRoundedRectangle` border + wider pill
+
+## Pattern for New Views
+
+```
+dc.clear() with COLOR_BLACK  →  fillRoundedRectangle(marginX, marginY, itemW, itemH, 14)  →  draw content inside margins
+```
+
+All X/Y coordinates for content (text, dots, bars, circles) must be relative to `marginX`, not screen edge.
+
+## Cover Art
+
+Still using styled initial circles (larger, FONT_TINY, outer ring border). Actual cover art via `Communications.makeImageRequest()` is future work — TODO comment marks the spot in PodcastMenuItem.draw().
+
+
+---
+
+# Phase D: Media Playback Integration Decisions
+
+**By:** Kaylee (Garmin Dev)  
+**Date:** 2026-04-19  
+**Affects:** Mal (Lead), Wash (API Dev), Zoe (QA)
+
+## Decision: PlaybackState Shared Module Pattern
+
+ContentDelegate (device native events) and NowPlayingView (sim/supplementary UI) both need to publish what's currently playing. Rather than two separate state stores, a single `PlaybackState` module with mutable module-level vars serves as the shared state. Writers: ContentDelegate or NowPlayingView. Readers: HomeMenuView dock, any future widget.
+
+**Rationale:** Modules are singletons in CIQ — no instantiation overhead. Module-level vars persist for the app lifetime. This avoids passing state through constructor chains or Application.Storage round-trips for ephemeral playback info.
+
+## Decision: ContentDelegate Singleton
+
+`getContentDelegate()` in YoCastsApp now returns a cached instance instead of creating a new delegate on each call. This preserves the position-logging timer, current track context, and playing state between system calls.
+
+**Rationale:** The system may call `getContentDelegate()` multiple times during a playback session. Recreating the delegate each time would reset timers and lose track state.
+
+## Decision: Song Event Numeric Constants
+
+Used numeric constants (0=start, 1=pause, 2=resume, 3=complete, 4=stop) for `onSong()` event handling rather than relying on `Media.SONG_EVENT_*` symbol names. Extensive println logging included for hardware verification.
+
+**Rationale:** SDK symbol names for song events are not documented with certainty. Numeric values are stable across SDK versions. The logging will let us validate on real hardware and adjust if needed.
+
+## Open for Mal/Zoe
+
+- Hardware testing needed: onSong() event values must be verified on Venu 4
+- Position logging frequency: currently 15s timer + every onSong event. May need tuning based on battery impact.
+- NowPlayingView is supplementary — native Garmin music player is the primary playback UI. Do we want to invest in making our NowPlayingView control real playback in Phase E?
+
