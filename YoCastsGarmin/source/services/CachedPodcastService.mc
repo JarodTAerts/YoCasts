@@ -26,17 +26,22 @@ class CachedPodcastService extends IPodcastService {
     private var _queue as Array<Dictionary> = [] as Array<Dictionary>;
     private var _episodes as Dictionary = {} as Dictionary;
     private var _nowPlaying as Dictionary? = null;
+    private var _episodeDetails as Dictionary = {} as Dictionary;
     private var _hasCachedData as Boolean = false;
+    private var _hasCachedPodcasts as Boolean = false;
+    private var _hasCachedQueue as Boolean = false;
 
     // Refresh tracking — prevents redundant Storage writes
     private var _podcastsRefreshPending as Boolean = false;
     private var _queueRefreshPending as Boolean = false;
     private var _episodeRefreshPending as Dictionary = {} as Dictionary;
+    private var _detailRefreshPending as Dictionary = {} as Dictionary;
 
     // Cache TTLs in seconds (controls revalidation, not expiry)
     private const TTL_QUEUE = 300;       // 5 minutes
     private const TTL_PODCASTS = 1800;   // 30 minutes
     private const TTL_EPISODES = 3600;   // 1 hour
+    private const TTL_DETAILS = 86400;   // 24 hours
 
     function initialize(wrapped as IPodcastService) {
         IPodcastService.initialize();
@@ -50,6 +55,7 @@ class CachedPodcastService extends IPodcastService {
         if (podcasts != null) {
             _podcasts = podcasts;
             _hasCachedData = true;
+            _hasCachedPodcasts = true;
         }
 
         var queue = CacheManager.loadQueue();
@@ -59,6 +65,7 @@ class CachedPodcastService extends IPodcastService {
                 _nowPlaying = _queue[0];
             }
             _hasCachedData = true;
+            _hasCachedQueue = true;
         }
     }
 
@@ -72,6 +79,31 @@ class CachedPodcastService extends IPodcastService {
 
     function isDataReady() as Boolean {
         return _hasCachedData || _wrapped.isDataReady();
+    }
+
+    function isLoading() as Boolean {
+        return _wrapped.isLoading();
+    }
+
+    function getLastError() as String {
+        return _wrapped.getLastError();
+    }
+
+    function hasLoadedPodcasts() as Boolean {
+        return _hasCachedPodcasts || _wrapped.hasLoadedPodcasts();
+    }
+
+    function hasLoadedQueue() as Boolean {
+        return _hasCachedQueue || _wrapped.hasLoadedQueue();
+    }
+
+    function getAccessToken() as String {
+        return _wrapped.getAccessToken();
+    }
+
+    function hasEpisodesForPodcast(podcastUuid as String) as Boolean {
+        return _episodes.hasKey(podcastUuid) ||
+               _wrapped.hasEpisodesForPodcast(podcastUuid);
     }
 
     // ================================================================
@@ -99,7 +131,6 @@ class CachedPodcastService extends IPodcastService {
     //! Fetch episodes for a podcast. Loads from cache first; if connected
     //! and cache is stale (or missing), delegates to the wrapped service.
     function requestEpisodesForPodcast(podcastUuid as String) as Void {
-        // Lazy-load from Storage if not yet in memory
         if (!_episodes.hasKey(podcastUuid)) {
             var cached = CacheManager.loadEpisodes(podcastUuid);
             if (cached != null) {
@@ -118,6 +149,46 @@ class CachedPodcastService extends IPodcastService {
         }
     }
 
+    function requestEpisodeDetails(episodeUuid as String) as Void {
+        var cachedHasSummary = false;
+        if (!_episodeDetails.hasKey(episodeUuid)) {
+            var cached = CacheManager.loadEpisodeDetails(episodeUuid);
+            if (cached != null) {
+                _episodeDetails.put(episodeUuid, cached);
+                var summary = cached.get(DataKeys.E_SUMMARY);
+                cachedHasSummary = summary != null &&
+                    summary instanceof String &&
+                    (summary as String).length() > 0;
+            }
+        } else {
+            var existing = _episodeDetails.get(episodeUuid) as Dictionary;
+            var summary = existing.get(DataKeys.E_SUMMARY);
+            cachedHasSummary = summary != null &&
+                summary instanceof String &&
+                (summary as String).length() > 0;
+        }
+
+        if (_isConnected()) {
+            var age = CacheManager.getCacheAge(
+                CacheManager.KEY_DETAIL_PREFIX + episodeUuid
+            );
+            System.println(
+                "YoCasts: episode detail cache age=" + age +
+                " uuid=" + episodeUuid
+            );
+            if (!cachedHasSummary || age < 0 || age > TTL_DETAILS) {
+                _detailRefreshPending.put(episodeUuid, true);
+                _wrapped.requestEpisodeDetails(episodeUuid);
+            }
+        }
+    }
+
+    function syncPendingChanges() as Void {
+        if (_isConnected()) {
+            _wrapped.syncPendingChanges();
+        }
+    }
+
     // ================================================================
     // IPodcastService — synchronous getters (read-through cache)
     //
@@ -130,11 +201,12 @@ class CachedPodcastService extends IPodcastService {
     function getSubscribedPodcasts() as Array<Dictionary> {
         if (_podcastsRefreshPending) {
             var fresh = _wrapped.getSubscribedPodcasts();
-            if (fresh.size() > 0) {
+            if (_wrapped.hasLoadedPodcasts()) {
                 _podcasts = fresh;
                 CacheManager.savePodcasts(_podcasts);
                 _podcastsRefreshPending = false;
-                _hasCachedData = true;
+                _hasCachedPodcasts = true;
+                _hasCachedData = _hasCachedData || fresh.size() > 0;
             }
         }
         return _podcasts;
@@ -144,7 +216,7 @@ class CachedPodcastService extends IPodcastService {
         // Check for pending refresh from wrapped service
         if (_episodeRefreshPending.hasKey(podcastUuid)) {
             var fresh = _wrapped.getEpisodesForPodcast(podcastUuid);
-            if (fresh.size() > 0) {
+            if (_wrapped.hasEpisodesForPodcast(podcastUuid)) {
                 _episodes.put(podcastUuid, fresh);
                 CacheManager.saveEpisodes(podcastUuid, fresh);
                 _episodeRefreshPending.remove(podcastUuid);
@@ -170,13 +242,16 @@ class CachedPodcastService extends IPodcastService {
     function getQueue() as Array<Dictionary> {
         if (_queueRefreshPending) {
             var fresh = _wrapped.getQueue();
-            if (fresh.size() > 0) {
+            if (_wrapped.hasLoadedQueue()) {
                 _queue = fresh;
                 CacheManager.saveQueue(_queue);
                 _queueRefreshPending = false;
-                _hasCachedData = true;
+                _hasCachedQueue = true;
+                _hasCachedData = _hasCachedData || fresh.size() > 0;
                 if (_queue.size() > 0) {
                     _nowPlaying = _queue[0];
+                } else {
+                    _nowPlaying = null;
                 }
             }
         }
@@ -189,6 +264,28 @@ class CachedPodcastService extends IPodcastService {
             _nowPlaying = wrappedNow;
         }
         return _nowPlaying;
+    }
+
+    function getEpisodeDetails(episodeUuid as String) as Dictionary? {
+        if (_detailRefreshPending.hasKey(episodeUuid)) {
+            var fresh = _wrapped.getEpisodeDetails(episodeUuid);
+            if (fresh != null) {
+                _episodeDetails.put(episodeUuid, fresh);
+                CacheManager.saveEpisodeDetails(episodeUuid, fresh);
+                _detailRefreshPending.remove(episodeUuid);
+            }
+        }
+
+        var details = _episodeDetails.get(episodeUuid);
+        if (details != null && details instanceof Dictionary) {
+            return details as Dictionary;
+        }
+        var cached = CacheManager.loadEpisodeDetails(episodeUuid);
+        if (cached != null) {
+            _episodeDetails.put(episodeUuid, cached);
+            return cached;
+        }
+        return null;
     }
 
     // ================================================================

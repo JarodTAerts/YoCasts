@@ -90,6 +90,29 @@ module ChangeLog {
         Application.Storage.deleteValue(KEY_CHANGELOG);
     }
 
+    //! Remove one confirmed entry without disturbing newer concurrent writes.
+    function removeEntryById(id as Number) as Void {
+        var current = getEntries();
+        var remaining = [] as Array<Dictionary>;
+        for (var i = 0; i < current.size(); i++) {
+            var entry = current[i] as Dictionary;
+            var entryId = entry.get("id");
+            if (entryId == null || !(entryId instanceof Number) ||
+                (entryId as Number) != id) {
+                remaining.add(entry);
+            }
+        }
+
+        if (remaining.size() == 0) {
+            clearEntries();
+        } else {
+            Application.Storage.setValue(
+                KEY_CHANGELOG,
+                remaining as Application.Storage.ValueType
+            );
+        }
+    }
+
     //! Number of pending entries (for UI display, e.g., "3 pending syncs").
     function getEntryCount() as Number {
         return getEntries().size();

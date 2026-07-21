@@ -275,3 +275,5 @@ PocketcastsApiTesting/**/test-results/
 
 # Garmin CIQ: Local simulator credentials (never commit)
 YoCastsGarmin/source/sim/LocalCredentials.mc
+YoCastsGarmin/developer_key*
+YoCastsGarmin/build/

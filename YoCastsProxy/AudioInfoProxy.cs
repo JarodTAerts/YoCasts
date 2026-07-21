@@ -1,5 +1,7 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.AspNetCore.Http;
@@ -34,6 +36,8 @@ public class AudioInfoProxy
     private static readonly ConcurrentDictionary<string, AudioInfoCacheEntry> _cache = new();
     private static readonly TimeSpan StandardCacheTtl = TimeSpan.FromHours(2);
     private static readonly TimeSpan PremiumCacheTtl = TimeSpan.FromMinutes(30);
+    private const int MaxEpisodeResponseBytes = 1024 * 1024;
+    private const int MaxErrorResponseBytes = 64 * 1024;
 
     public AudioInfoProxy(IHttpClientFactory httpClientFactory, ILogger<AudioInfoProxy> logger)
     {
@@ -59,8 +63,12 @@ public class AudioInfoProxy
         }
         var token = authHeader["Bearer ".Length..];
 
-        // Check cache first
-        if (_cache.TryGetValue(uuid, out var cached) && cached.ExpiresAt > DateTime.UtcNow)
+        // Private/premium feed URLs can be account-specific. Scope cached
+        // capability URLs to a token fingerprint so one user never receives
+        // another user's signed enclosure URL.
+        var cacheKey = CreateCacheKey(uuid, token);
+        if (_cache.TryGetValue(cacheKey, out var cached) &&
+            cached.ExpiresAt > DateTime.UtcNow)
         {
             _logger.LogInformation("AudioInfo: cache hit for {Uuid}", uuid);
             return new OkObjectResult(cached.Response);
@@ -81,7 +89,9 @@ public class AudioInfoProxy
         HttpResponseMessage episodeResponse;
         try
         {
-            episodeResponse = await pocketCastsClient.SendAsync(episodeRequest);
+            episodeResponse = await pocketCastsClient.SendAsync(
+                episodeRequest,
+                HttpCompletionOption.ResponseHeadersRead);
         }
         catch (Exception ex)
         {
@@ -91,10 +101,13 @@ public class AudioInfoProxy
                 StatusCode = StatusCodes.Status502BadGateway
             };
         }
+        using var episodeResponseLease = episodeResponse;
 
         if (!episodeResponse.IsSuccessStatusCode)
         {
-            var errorBody = await episodeResponse.Content.ReadAsStringAsync();
+            var errorBody = await ContentText.ReadLimitedStringAsync(
+                episodeResponse.Content,
+                MaxErrorResponseBytes);
             _logger.LogWarning("AudioInfo: PocketCasts returned {StatusCode} for episode {Uuid}",
                 episodeResponse.StatusCode, uuid);
             return new ContentResult
@@ -105,7 +118,25 @@ public class AudioInfoProxy
             };
         }
 
-        var episodeJson = await episodeResponse.Content.ReadAsStringAsync();
+        string episodeJson;
+        try
+        {
+            episodeJson = await ContentText.ReadLimitedStringAsync(
+                episodeResponse.Content,
+                MaxEpisodeResponseBytes);
+        }
+        catch (InvalidDataException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "AudioInfo: oversized episode metadata for {Uuid}",
+                uuid);
+            return new ObjectResult(
+                new { error = "Episode metadata response too large" })
+            {
+                StatusCode = StatusCodes.Status502BadGateway
+            };
+        }
         var episodeData = JsonSerializer.Deserialize<JsonElement>(episodeJson);
 
         // Extract the audio URL and metadata from the episode response
@@ -121,6 +152,20 @@ public class AudioInfoProxy
             ? ptProp.GetString() : "";
         var fileType = episodeData.TryGetProperty("fileType", out var ftProp)
             ? ftProp.GetString() : "";
+        var summary = "";
+        foreach (var field in new[] { "showNotes", "descriptionHtml", "description", "notes" })
+        {
+            if (episodeData.TryGetProperty(field, out var summaryProp) &&
+                summaryProp.ValueKind == JsonValueKind.String)
+            {
+                summary = summaryProp.GetString() ?? "";
+                if (!string.IsNullOrWhiteSpace(summary))
+                    break;
+            }
+        }
+        summary = ContentText.Compact(summary, 700);
+        var published = episodeData.TryGetProperty("published", out var pubProp)
+            ? pubProp.ToString() : "";
 
         if (string.IsNullOrEmpty(audioUrl))
         {
@@ -136,7 +181,7 @@ public class AudioInfoProxy
 
         // Step 2: HEAD request to the audio URL to get real file size.
         // Audio URLs are public CDN links — no Bearer token needed.
-        // The HEAD client follows redirects automatically.
+        // Redirects are resolved manually so every hop can be checked for SSRF.
         long fileSize = 0;
         string contentType = fileType ?? "audio/mpeg";
         string finalUrl = audioUrl!;
@@ -144,30 +189,23 @@ public class AudioInfoProxy
         try
         {
             var headClient = _httpClientFactory.CreateClient("AudioHead");
-            var headRequest = new HttpRequestMessage(HttpMethod.Head, audioUrl);
-            var headResponse = await headClient.SendAsync(headRequest);
-
-            if (headResponse.IsSuccessStatusCode)
+            var resolved = await ResolveAudioHeadAsync(headClient, audioUrl);
+            if (resolved == null)
             {
-                if (headResponse.Content.Headers.ContentLength.HasValue)
+                return new ObjectResult(new { error = "Unsafe audio URL" })
                 {
-                    fileSize = headResponse.Content.Headers.ContentLength.Value;
-                }
-                if (headResponse.Content.Headers.ContentType?.MediaType != null)
-                {
-                    contentType = headResponse.Content.Headers.ContentType.MediaType;
-                }
-                // Capture final URL after redirects
-                if (headResponse.RequestMessage?.RequestUri != null)
-                {
-                    finalUrl = headResponse.RequestMessage.RequestUri.ToString();
-                }
+                    StatusCode = StatusCodes.Status400BadRequest
+                };
             }
-            else
+
+            finalUrl = resolved.FinalUrl;
+            if (resolved.FileSize > 0)
             {
-                _logger.LogWarning("AudioInfo: HEAD request returned {StatusCode} for {Url}",
-                    headResponse.StatusCode, audioUrl);
-                // Non-fatal — we still have the URL and can try downloading
+                fileSize = resolved.FileSize;
+            }
+            if (!string.IsNullOrEmpty(resolved.ContentType))
+            {
+                contentType = resolved.ContentType;
             }
         }
         catch (Exception ex)
@@ -186,12 +224,14 @@ public class AudioInfoProxy
             requiresAuth,
             title,
             podcastTitle,
-            podcastUuid
+            podcastUuid,
+            summary,
+            published
         };
 
         // Cache the result
         var ttl = requiresAuth ? PremiumCacheTtl : StandardCacheTtl;
-        _cache[uuid] = new AudioInfoCacheEntry(result, DateTime.UtcNow + ttl);
+        _cache[cacheKey] = new AudioInfoCacheEntry(result, DateTime.UtcNow + ttl);
 
         // Evict expired entries periodically (simple inline eviction)
         if (_cache.Count > 200)
@@ -219,5 +259,83 @@ public class AudioInfoProxy
                (url.Contains("|") && url.Contains("supportingcast", StringComparison.OrdinalIgnoreCase));
     }
 
+    private static string CreateCacheKey(string uuid, string token)
+    {
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return $"{uuid}:{Convert.ToHexString(digest.AsSpan(0, 8))}";
+    }
+
+    private async Task<ResolvedAudioHead?> ResolveAudioHeadAsync(
+        HttpClient client,
+        string audioUrl)
+    {
+        if (!Uri.TryCreate(audioUrl, UriKind.Absolute, out var current))
+            return null;
+
+        for (var redirectCount = 0; redirectCount <= 10; redirectCount++)
+        {
+            if (!await IsSafePublicUriAsync(current))
+            {
+                _logger.LogWarning("AudioInfo: blocked unsafe audio URL host {Host}",
+                    current.Host);
+                return null;
+            }
+
+            using var request = new HttpRequestMessage(HttpMethod.Head, current);
+            using var response = await client.SendAsync(request);
+
+            if (IsRedirect(response.StatusCode))
+            {
+                var location = response.Headers.Location;
+                if (location == null)
+                    return null;
+                current = location.IsAbsoluteUri
+                    ? location
+                    : new Uri(current, location);
+                continue;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "AudioInfo: HEAD request returned {StatusCode} for {Url}",
+                    response.StatusCode,
+                    current);
+                return new ResolvedAudioHead(current.ToString(), 0, "");
+            }
+
+            return new ResolvedAudioHead(
+                current.ToString(),
+                response.Content.Headers.ContentLength ?? 0,
+                response.Content.Headers.ContentType?.MediaType ?? "");
+        }
+
+        _logger.LogWarning("AudioInfo: redirect limit exceeded for {Url}", audioUrl);
+        return null;
+    }
+
+    private static bool IsRedirect(HttpStatusCode statusCode)
+    {
+        return statusCode is HttpStatusCode.MovedPermanently
+            or HttpStatusCode.Redirect
+            or HttpStatusCode.RedirectMethod
+            or HttpStatusCode.TemporaryRedirect
+            or HttpStatusCode.PermanentRedirect;
+    }
+
+    private static async Task<bool> IsSafePublicUriAsync(Uri uri)
+    {
+        if (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+            return false;
+        if (string.IsNullOrWhiteSpace(uri.Host))
+            return false;
+
+        return await NetworkGuard.IsPublicHostAsync(uri.DnsSafeHost);
+    }
+
     private record AudioInfoCacheEntry(object Response, DateTime ExpiresAt);
+    private record ResolvedAudioHead(
+        string FinalUrl,
+        long FileSize,
+        string ContentType);
 }

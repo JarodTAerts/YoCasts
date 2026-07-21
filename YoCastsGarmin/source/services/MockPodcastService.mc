@@ -26,6 +26,14 @@ class MockPodcastService extends IPodcastService {
         return true;
     }
 
+    function hasLoadedPodcasts() as Boolean {
+        return true;
+    }
+
+    function hasLoadedQueue() as Boolean {
+        return true;
+    }
+
     function fetchAll() as Void {
         // No-op — mock data is pre-loaded
     }
@@ -52,6 +60,23 @@ class MockPodcastService extends IPodcastService {
 
     function getNowPlaying() as Dictionary? {
         return _nowPlaying;
+    }
+
+    function requestEpisodeDetails(episodeUuid as String) as Void {
+    }
+
+    function getEpisodeDetails(episodeUuid as String) as Dictionary? {
+        var podcastIds = _episodes.keys();
+        for (var i = 0; i < podcastIds.size(); i++) {
+            var episodes = _episodes.get(podcastIds[i]) as Array<Dictionary>;
+            for (var j = 0; j < episodes.size(); j++) {
+                var episode = episodes[j] as Dictionary;
+                if ((episode[DataKeys.E_UUID] as String).equals(episodeUuid)) {
+                    return episode;
+                }
+            }
+        }
+        return null;
     }
 
     // ---- Mock Data Builders ----

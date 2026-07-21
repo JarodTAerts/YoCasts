@@ -8,4 +8,12 @@
     <setting propertyKey="@Properties.useMockData" title="Use Demo Data">
         <settingConfig type="boolean"/>
     </setting>
+    <setting propertyKey="@Properties.AutoDownloadCount" title="@Strings.AutoDownloadTitle">
+        <settingConfig type="list">
+            <listEntry value="0">@Strings.AutoDownloadOff</listEntry>
+            <listEntry value="1">@Strings.AutoDownloadOne</listEntry>
+            <listEntry value="3">@Strings.AutoDownloadThree</listEntry>
+            <listEntry value="5">@Strings.AutoDownloadFive</listEntry>
+        </settingConfig>
+    </setting>
 </settings>

@@ -1,4 +1,5 @@
 import Toybox.Lang;
+import Toybox.Application;
 import Toybox.WatchUi;
 import Toybox.Graphics;
 import Toybox.System;
@@ -11,9 +12,7 @@ import Toybox.Timer;
 class NowPlayingView extends WatchUi.View {
 
     private var _episode as Dictionary;
-    private var _isPlaying as Boolean = false;
     private var _currentPosition as Number;
-    private var _positionTracker as PositionTracker;
 
     // Brand colors looked up from podcast data
     private var _brandColor as Number = 0x55AAFF;
@@ -28,7 +27,7 @@ class NowPlayingView extends WatchUi.View {
     private const PODCAST_Y = 80;
     private const TITLE_Y = 140;
     private const CONTROLS_Y = 245;
-    private const TIME_Y = 300;
+    private const TIME_Y = 325;
 
     private const SKIP_BACK_CX = 110;
     private const PLAY_CX = 195;
@@ -55,32 +54,18 @@ class NowPlayingView extends WatchUi.View {
     private var _podMaxScroll as Number = 0;
     private var _podPhase as Number = 0;
     private var _podPause as Number = 15;
+    private var _stateRefreshTicks as Number = 0;
 
     function initialize(episode as Dictionary) {
         View.initialize();
         _episode = episode;
         _currentPosition = (episode[DataKeys.E_PLAYED_UP_TO] as Number);
+        _loadBrandColors();
+    }
 
-        var podUuidVal = episode.get(DataKeys.E_PODCAST_UUID);
+    private function _loadBrandColors() as Void {
+        var podUuidVal = _episode.get(DataKeys.E_PODCAST_UUID);
         var podUuid = (podUuidVal != null) ? podUuidVal as String : "";
-        _positionTracker = new PositionTracker(
-            episode[DataKeys.E_UUID] as String,
-            podUuid,
-            episode[DataKeys.E_DURATION] as Number
-        );
-
-        // Initialize shared PlaybackState so HomeMenuView dock stays current
-        PlaybackState.update(
-            episode[DataKeys.E_UUID] as String,
-            podUuid,
-            episode[DataKeys.E_TITLE] as String,
-            (episode.get(DataKeys.E_PODCAST_TITLE) != null)
-                ? episode[DataKeys.E_PODCAST_TITLE] as String : "",
-            _currentPosition,
-            episode[DataKeys.E_DURATION] as Number,
-            false
-        );
-
         // Look up podcast brand colors from cache
         var podcasts = CacheManager.loadPodcasts();
         if (podcasts != null && !podUuid.equals("")) {
@@ -91,6 +76,8 @@ class NowPlayingView extends WatchUi.View {
     }
 
     function onShow() as Void {
+        PlaybackState.restore();
+        _followNativeTrack();
         if (_marqueeTimer == null) {
             _marqueeTimer = new Timer.Timer();
         }
@@ -101,12 +88,18 @@ class NowPlayingView extends WatchUi.View {
         if (_marqueeTimer != null) {
             (_marqueeTimer as Timer.Timer).stop();
         }
-        _positionTracker.stopTracking();
     }
 
     //! Marquee timer callback — animates overflowing text
     function onMarqueeTick() as Void {
         var needsUpdate = false;
+        _stateRefreshTicks++;
+        if (_stateRefreshTicks >= 7) {
+            _stateRefreshTicks = 0;
+            PlaybackState.restore();
+            _followNativeTrack();
+            needsUpdate = PlaybackState.hasActivePlayback();
+        }
 
         // Episode title marquee
         if (_titleMaxScroll > 0) {
@@ -158,10 +151,13 @@ class NowPlayingView extends WatchUi.View {
 
         if (needsUpdate) {
             WatchUi.requestUpdate();
+        } else if (PlaybackState.isPlaying) {
+            WatchUi.requestUpdate();
         }
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
+        _followNativeTrack();
         // Clear background — subtle brand color wash on AMOLED
         var bgWash = DataFormat.dimColor(DataFormat.brightenColor(_brandColor, 40), 0.10);
         dc.setColor(bgWash, bgWash);
@@ -170,6 +166,10 @@ class NowPlayingView extends WatchUi.View {
         var duration = _episode[DataKeys.E_DURATION] as Number;
         var podcastTitle = _episode[DataKeys.E_PODCAST_TITLE] as String;
         var episodeTitle = _episode[DataKeys.E_TITLE] as String;
+        if (PlaybackState.currentUuid.equals(
+                _episode[DataKeys.E_UUID] as String)) {
+            _currentPosition = PlaybackState.getEstimatedPosition();
+        }
 
         // 1. Progress arc background (full circle, dark gray)
         dc.setColor(0x333333, Graphics.COLOR_TRANSPARENT);
@@ -208,48 +208,53 @@ class NowPlayingView extends WatchUi.View {
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
-    //! Draw the three control buttons: skip back, play/pause, skip forward
+    private function _followNativeTrack() as Void {
+        if (PlaybackState.currentUuid.length() == 0) {
+            return;
+        }
+        var shownUuid = _episode.get(DataKeys.E_UUID);
+        if (shownUuid != null &&
+            (shownUuid as String).equals(PlaybackState.currentUuid)) {
+            return;
+        }
+
+        var downloads = DownloadQueue.getDownloads();
+        for (var i = 0; i < downloads.size(); i++) {
+            var item = downloads[i] as Dictionary;
+            var uuid = item.get(DownloadQueue.DL_UUID);
+            if (uuid != null &&
+                (uuid as String).equals(PlaybackState.currentUuid)) {
+                _episode = DownloadQueue.toEpisodeDict(item);
+                _currentPosition = PlaybackState.getEstimatedPosition();
+                _titleOffset = 0;
+                _podOffset = 0;
+                _titlePhase = 0;
+                _podPhase = 0;
+                _brandColor = 0x55AAFF;
+                _brandTint = 0xFFFFFF;
+                _loadBrandColors();
+                return;
+            }
+        }
+    }
+
+    //! Draw one hand-off control. Skip and pause live in Garmin's player.
     private function drawControls(dc as Graphics.Dc) as Void {
-        var skipBg = DataFormat.dimColor(DataFormat.brightenColor(_brandColor, 60), 0.35);
-        var skipFg = DataFormat.dimColor(DataFormat.brightenColor(_brandTint, 180), 0.7);
         var playBtnColor = DataFormat.brightenColor(_brandColor, 200);
 
-        // --- Skip Back button (left, brand-tinted circle) ---
-        dc.setColor(skipBg, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(SKIP_BACK_CX, CONTROLS_Y, SKIP_R);
-        dc.setColor(skipFg, Graphics.COLOR_TRANSPARENT);
-        // Rewind icon: two left-pointing triangles + bar
-        var bx = SKIP_BACK_CX;
-        var by = CONTROLS_Y;
-        dc.fillPolygon([[bx + 2, by - 8], [bx + 2, by + 8], [bx - 8, by]]);
-        dc.fillPolygon([[bx + 10, by - 8], [bx + 10, by + 8], [bx, by]]);
-        dc.fillRectangle(bx - 10, by - 8, 2, 16);
-
-        // --- Play/Pause button (center, brand accent circle) ---
         dc.setColor(playBtnColor, Graphics.COLOR_TRANSPARENT);
         dc.fillCircle(PLAY_CX, CONTROLS_Y, PLAY_R);
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_TRANSPARENT);
-        if (_isPlaying) {
-            // Pause bars
-            dc.fillRectangle(PLAY_CX - 10, CONTROLS_Y - 12, 7, 24);
-            dc.fillRectangle(PLAY_CX + 3, CONTROLS_Y - 12, 7, 24);
-        } else {
-            // Play triangle (right-pointing)
-            dc.fillPolygon([[PLAY_CX - 10, CONTROLS_Y - 14],
-                            [PLAY_CX - 10, CONTROLS_Y + 14],
-                            [PLAY_CX + 14, CONTROLS_Y]]);
-        }
+        dc.fillPolygon([[PLAY_CX - 10, CONTROLS_Y - 14],
+                        [PLAY_CX - 10, CONTROLS_Y + 14],
+                        [PLAY_CX + 14, CONTROLS_Y]]);
 
-        // --- Skip Forward button (right, brand-tinted circle) ---
-        dc.setColor(skipBg, Graphics.COLOR_TRANSPARENT);
-        dc.fillCircle(SKIP_FWD_CX, CONTROLS_Y, SKIP_R);
-        dc.setColor(skipFg, Graphics.COLOR_TRANSPARENT);
-        // Fast-forward icon: two right-pointing triangles + bar
-        var fx = SKIP_FWD_CX;
-        var fy = CONTROLS_Y;
-        dc.fillPolygon([[fx - 10, fy - 8], [fx - 10, fy + 8], [fx, fy]]);
-        dc.fillPolygon([[fx - 2, fy - 8], [fx - 2, fy + 8], [fx + 8, fy]]);
-        dc.fillRectangle(fx + 8, fy - 8, 2, 16);
+        dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
+        var label = PlaybackState.isPlaying
+            ? "Playing in Garmin player" : "Open Garmin player";
+        dc.drawText(CX, CONTROLS_Y + 48, Graphics.FONT_XTINY, label,
+                    Graphics.TEXT_JUSTIFY_CENTER |
+                    Graphics.TEXT_JUSTIFY_VCENTER);
     }
 
     //! Draw text with marquee scrolling if it overflows the container width.
@@ -281,49 +286,10 @@ class NowPlayingView extends WatchUi.View {
         dc.clearClip();
     }
 
-    //! Public accessor for PositionTracker to read current position.
-    function getCurrentPosition() as Number {
-        return _currentPosition;
-    }
-
-    //! Toggle play/pause state and start/stop position tracking.
-    function togglePlayPause() as Void {
-        _isPlaying = !_isPlaying;
-        if (_isPlaying) {
-            _positionTracker.startTracking(self);
-        } else {
-            _positionTracker.logNow();
-            _positionTracker.stopTracking();
-        }
-        PlaybackState.setPlaying(_isPlaying);
-        WatchUi.requestUpdate();
-    }
-
-    //! Skip forward 30 seconds
-    function skipForward() as Void {
-        var duration = _episode[DataKeys.E_DURATION] as Number;
-        _currentPosition = _currentPosition + 30;
-        if (_currentPosition > duration) {
-            _currentPosition = duration;
-        }
-        if (_positionTracker.isTracking()) {
-            _positionTracker.logNow();
-        }
-        PlaybackState.updatePosition(_currentPosition);
-        WatchUi.requestUpdate();
-    }
-
-    //! Skip back 15 seconds
-    function skipBack() as Void {
-        _currentPosition = _currentPosition - 15;
-        if (_currentPosition < 0) {
-            _currentPosition = 0;
-        }
-        if (_positionTracker.isTracking()) {
-            _positionTracker.logNow();
-        }
-        PlaybackState.updatePosition(_currentPosition);
-        WatchUi.requestUpdate();
+    //! Playback controls belong to Garmin's native media player.
+    function openNativePlayer() as Void {
+        var uuid = _episode[DataKeys.E_UUID] as String;
+        (Application.getApp() as YoCastsApp).requestPlayback(uuid);
     }
 }
 
@@ -353,21 +319,9 @@ class NowPlayingDelegate extends WatchUi.InputDelegate {
         var tapX = coords[0] as Number;
         var tapY = coords[1] as Number;
 
-        // Hit test against skip back button (110, 245)
-        if (isInCircle(tapX, tapY, 110, 245, view.SKIP_TOUCH_R)) {
-            view.skipBack();
-            return true;
-        }
-
-        // Hit test against play/pause button (195, 245)
+        // Center button opens Garmin's native media player.
         if (isInCircle(tapX, tapY, 195, 245, view.PLAY_TOUCH_R)) {
-            view.togglePlayPause();
-            return true;
-        }
-
-        // Hit test against skip forward button (280, 245)
-        if (isInCircle(tapX, tapY, 280, 245, view.SKIP_TOUCH_R)) {
-            view.skipForward();
+            view.openNativePlayer();
             return true;
         }
 
@@ -380,23 +334,7 @@ class NowPlayingDelegate extends WatchUi.InputDelegate {
 
         if (key == WatchUi.KEY_ENTER || key == WatchUi.KEY_START) {
             if (_view != null) {
-                (_view as NowPlayingView).togglePlayPause();
-            }
-            return true;
-        }
-
-        if (key == WatchUi.KEY_DOWN) {
-            // DOWN = skip forward 30s
-            if (_view != null) {
-                (_view as NowPlayingView).skipForward();
-            }
-            return true;
-        }
-
-        if (key == WatchUi.KEY_UP) {
-            // UP = skip back 15s
-            if (_view != null) {
-                (_view as NowPlayingView).skipBack();
+                (_view as NowPlayingView).openNativePlayer();
             }
             return true;
         }

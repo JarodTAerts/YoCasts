@@ -15,6 +15,7 @@ class SubscribedView extends WatchUi.View {
     private var _podcasts as Array<Dictionary> = [] as Array<Dictionary>;
     private var _emptyLabel as String? = null;
     private var _scrollOffset as Number = 0;
+    private var _selectedIndex as Number = 0;
 
     private const TITLE_H = 60;
     private const ITEM_H = 80;
@@ -28,10 +29,15 @@ class SubscribedView extends WatchUi.View {
 
     private function loadPodcasts() as Void {
         var raw = _service.getSubscribedPodcasts();
+        _podcasts = [] as Array<Dictionary>;
+        _emptyLabel = null;
         System.println("YoCasts: loadPodcasts() — " + raw.size() + " podcasts available");
 
         if (raw.size() == 0) {
-            _emptyLabel = _service.isDataReady() ? "No subscriptions" : "Loading...";
+            var error = _service.getLastError();
+            _emptyLabel = error.length() > 0
+                ? error
+                : (_service.isDataReady() ? "No subscriptions" : "Loading...");
             System.println("YoCasts: loadPodcasts() — empty state: " + _emptyLabel);
             return;
         }
@@ -42,12 +48,17 @@ class SubscribedView extends WatchUi.View {
             var pod = raw[i] as Dictionary;
             _podcasts.add(pod);
         }
+        if (_selectedIndex >= _podcasts.size()) {
+            _selectedIndex = _podcasts.size() > 0 ? _podcasts.size() - 1 : 0;
+        }
+        clampScroll();
         System.println("YoCasts: loadPodcasts() — loaded " + limit + " podcasts");
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
         var w = dc.getWidth();
         var h = dc.getHeight();
+        loadPodcasts();
 
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
         dc.clear();
@@ -76,14 +87,17 @@ class SubscribedView extends WatchUi.View {
         for (var i = 0; i < _podcasts.size(); i++) {
             var itemY = itemsStartY + i * ITEM_H;
             if (itemY + ITEM_H < 0 || itemY >= h) { continue; }
-            drawPodcastItem(dc, _podcasts[i], itemY, ITEM_H, w);
+            drawPodcastItem(dc, _podcasts[i], itemY, ITEM_H, w,
+                            i == _selectedIndex);
         }
         dc.clearClip();
+        drawScrollIndicators(dc);
     }
 
     //! Draw a single podcast item pill
     private function drawPodcastItem(dc as Graphics.Dc, pod as Dictionary,
-                                      y as Number, h as Number, w as Number) as Void {
+                                      y as Number, h as Number, w as Number,
+                                      selected as Boolean) as Void {
         var title = pod[DataKeys.P_TITLE] as String;
         var author = pod[DataKeys.P_AUTHOR] as String;
 
@@ -105,6 +119,15 @@ class SubscribedView extends WatchUi.View {
         var bgColor = DataFormat.dimColor(boosted, 0.35);
         dc.setColor(bgColor, Graphics.COLOR_TRANSPARENT);
         dc.fillRoundedRectangle(marginX, y + marginY, itemW, itemH, radius);
+        if (selected) {
+            dc.setColor(DataFormat.brightenColor(brandColor, 180),
+                        Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawRoundedRectangle(
+                marginX, y + marginY, itemW, itemH, radius
+            );
+            dc.setPenWidth(1);
+        }
 
         // Initial circle
         var iconCX = marginX + 32;
@@ -155,6 +178,37 @@ class SubscribedView extends WatchUi.View {
         WatchUi.requestUpdate();
     }
 
+    function moveSelection(delta as Number) as Void {
+        if (_podcasts.size() == 0) { return; }
+        _selectedIndex += delta;
+        if (_selectedIndex < 0) {
+            _selectedIndex = _podcasts.size() - 1;
+        } else if (_selectedIndex >= _podcasts.size()) {
+            _selectedIndex = 0;
+        }
+
+        var screenH = System.getDeviceSettings().screenHeight;
+        var itemTop = TITLE_H + _selectedIndex * ITEM_H;
+        var itemBottom = itemTop + ITEM_H;
+        if (itemTop < _scrollOffset) {
+            _scrollOffset = itemTop;
+        } else if (itemBottom > _scrollOffset + screenH) {
+            _scrollOffset = itemBottom - screenH;
+        }
+        clampScroll();
+        WatchUi.requestUpdate();
+    }
+
+    function setSelectedIndex(index as Number) as Void {
+        if (index >= 0 && index < _podcasts.size()) {
+            _selectedIndex = index;
+        }
+    }
+
+    function getSelectedIndex() as Number {
+        return _selectedIndex;
+    }
+
     private function clampScroll() as Void {
         var screenH = System.getDeviceSettings().screenHeight;
         var contentH = TITLE_H + _podcasts.size() * ITEM_H;
@@ -162,6 +216,19 @@ class SubscribedView extends WatchUi.View {
         if (maxScroll < 0) { maxScroll = 0; }
         if (_scrollOffset > maxScroll) { _scrollOffset = maxScroll; }
         if (_scrollOffset < 0) { _scrollOffset = 0; }
+    }
+
+    private function drawScrollIndicators(dc as Graphics.Dc) as Void {
+        var screenH = System.getDeviceSettings().screenHeight;
+        var maxScroll = TITLE_H + _podcasts.size() * ITEM_H - screenH;
+        if (maxScroll < 0) { maxScroll = 0; }
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        if (_scrollOffset > 0) {
+            dc.fillPolygon([[265, 25], [277, 25], [271, 16]]);
+        }
+        if (_scrollOffset < maxScroll) {
+            dc.fillPolygon([[265, 363], [277, 363], [271, 372]]);
+        }
     }
 
     //! Hit-test: which podcast index is at screen Y? Returns -1 if none.
@@ -198,12 +265,12 @@ class SubscribedDelegate extends WatchUi.BehaviorDelegate {
     }
 
     function onNextPage() as Boolean {
-        _view.scroll(50);
+        _view.moveSelection(1);
         return true;
     }
 
     function onPreviousPage() as Boolean {
-        _view.scroll(-50);
+        _view.moveSelection(-1);
         return true;
     }
 
@@ -221,15 +288,40 @@ class SubscribedDelegate extends WatchUi.BehaviorDelegate {
             return false;
         }
 
-        var pod = _view.getPodcast(idx);
-        var podcastUuid = pod[DataKeys.P_UUID] as String;
-        var podcastTitle = pod[DataKeys.P_TITLE] as String;
-        System.println("YoCasts: SubscribedView tapped podcast " + podcastUuid);
+        _view.setSelectedIndex(idx);
+        return openPodcast(idx);
+    }
 
-        var episodeView = new EpisodeListView(_service, podcastUuid, podcastTitle);
-        WatchUi.pushView(episodeView,
-                         new EpisodeListDelegate(episodeView, _service, podcastUuid),
-                         WatchUi.SLIDE_UP);
+    function onKey(evt as WatchUi.KeyEvent) as Boolean {
+        var key = evt.getKey();
+        if (key == WatchUi.KEY_DOWN) {
+            _view.moveSelection(1);
+            return true;
+        }
+        if (key == WatchUi.KEY_UP) {
+            _view.moveSelection(-1);
+            return true;
+        }
+        if (key == WatchUi.KEY_ENTER || key == WatchUi.KEY_START) {
+            return openPodcast(_view.getSelectedIndex());
+        }
+        if (key == WatchUi.KEY_ESC) {
+            return onBack();
+        }
+        return false;
+    }
+
+    private function openPodcast(index as Number) as Boolean {
+        if (_service.getSubscribedPodcasts().size() == 0) {
+            return false;
+        }
+        var pod = _view.getPodcast(index);
+        var detailView = new PodcastDetailView(_service, pod);
+        WatchUi.pushView(
+            detailView,
+            new PodcastDetailDelegate(detailView),
+            WatchUi.SLIDE_UP
+        );
         return true;
     }
 
@@ -238,4 +330,3 @@ class SubscribedDelegate extends WatchUi.BehaviorDelegate {
         return true;
     }
 }
-

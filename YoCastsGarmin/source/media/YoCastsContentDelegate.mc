@@ -1,7 +1,6 @@
 import Toybox.Media;
 import Toybox.System;
 import Toybox.Lang;
-import Toybox.Timer;
 
 //! ContentDelegate for the native Garmin media player.
 //! Receives playback events (start, pause, resume, complete, stop) and
@@ -9,25 +8,17 @@ import Toybox.Timer;
 //!
 //! Lifecycle: System calls getContentDelegate() on YoCastsApp → returns
 //! this singleton. System calls onSong() on every playback state change.
-//! Timer-based position logging supplements onSong for 15s intervals.
+//! Playback is owned by Garmin's native player. Position is persisted from
+//! native song events; no foreground timer is required or available here.
 class YoCastsContentDelegate extends Media.ContentDelegate {
 
     private var _iterator as YoCastsContentIterator?;
-    private var _currentRefId as String = "";
+    private var _currentRefId as Object? = null;
     private var _currentUuid as String = "";
     private var _isPlaying as Boolean = false;
-    private var _positionTimer as Timer.Timer? = null;
+    private var _currentCompleted as Boolean = false;
     private var _lastPosition as Number = 0;
-
-    // Song event constants (Garmin Media module values)
-    private const EVENT_START = 0;
-    private const EVENT_PAUSE = 1;
-    private const EVENT_RESUME = 2;
-    private const EVENT_COMPLETE = 3;
-    private const EVENT_STOP = 4;
-
-    // 15s position logging interval per offline-sync-design.md §4.2
-    private const POSITION_LOG_INTERVAL_MS = 15000;
+    private var _playbackStartOffset as Number = 0;
 
     function initialize() {
         ContentDelegate.initialize();
@@ -42,7 +33,7 @@ class YoCastsContentDelegate extends Media.ContentDelegate {
     }
 
     //! Rebuild the iterator (e.g., after new downloads complete).
-    function resetContentIterator() as YoCastsContentIterator {
+    function resetContentIterator() as Media.ContentIterator? {
         _iterator = new YoCastsContentIterator();
         return _iterator;
     }
@@ -58,31 +49,30 @@ class YoCastsContentDelegate extends Media.ContentDelegate {
     //! contentRefId: ID of the ContentRef being played
     //! songEvent: numeric event type (start/pause/resume/complete/stop)
     //! playbackPosition: current position in seconds
-    function onSong(contentRefId, songEvent, playbackPosition) {
+    function onSong(contentRefId as Object, songEvent as Media.SongEvent,
+                    playbackPosition) as Void {
         System.println("YoCasts: onSong refId=" + contentRefId +
             " event=" + songEvent + " pos=" + playbackPosition);
 
-        var posNum = 0;
+        var rawPosition = 0;
         if (playbackPosition != null && playbackPosition instanceof Number) {
-            posNum = playbackPosition as Number;
+            rawPosition = playbackPosition as Number;
         }
-        _lastPosition = posNum;
 
         // Detect track change
-        if (contentRefId != null) {
-            var refStr = contentRefId.toString();
-            if (!refStr.equals(_currentRefId)) {
-                _onTrackChanged(refStr, posNum);
-            }
+        var trackChanged = false;
+        if (_currentRefId == null ||
+            !(_currentRefId as Object).equals(contentRefId)) {
+            _onTrackChanged(contentRefId, rawPosition);
+            trackChanged = true;
+        }
+        var posNum = rawPosition + _playbackStartOffset;
+        if (!trackChanged) {
+            _lastPosition = posNum;
         }
 
-        // Log position on every event (ground truth from system)
-        if (_currentUuid.length() > 0) {
-            _logPosition(posNum);
-        }
-
-        // Handle state-specific logic
         _handleSongEvent(songEvent, posNum);
+        PlaybackState.recordNativeEvent(songEvent as Number);
     }
 
     function onShuffle() {
@@ -106,19 +96,25 @@ class YoCastsContentDelegate extends Media.ContentDelegate {
     // ================================================================
 
     //! Called when the native player switches to a different track.
-    private function _onTrackChanged(refId as String, position as Number) as Void {
+    private function _onTrackChanged(refId as Object,
+                                     position as Number) as Void {
         // Log final position for previous episode
         if (_currentUuid.length() > 0 && _isPlaying) {
             _logPosition(_lastPosition);
         }
-        _stopPositionTimer();
 
         _currentRefId = refId;
         _currentUuid = _resolveUuid(refId);
-        _lastPosition = position;
+        _currentCompleted = false;
+        _playbackStartOffset = _getResumeOffset(refId);
+        var absolutePosition = position + _playbackStartOffset;
+        _lastPosition = absolutePosition;
+        if (_currentUuid.length() > 0) {
+            StorageManager.setSelectedEpisode(_currentUuid);
+        }
 
         // Update shared PlaybackState with new track info
-        _updatePlaybackState(position, false);
+        _updatePlaybackState(absolutePosition, false);
 
         System.println("YoCasts: track changed to uuid=" + _currentUuid);
     }
@@ -127,31 +123,38 @@ class YoCastsContentDelegate extends Media.ContentDelegate {
     // Song event state machine
     // ================================================================
 
-    private function _handleSongEvent(songEvent, position as Number) as Void {
-        var evt = -1;
-        if (songEvent != null && songEvent instanceof Number) {
-            evt = songEvent as Number;
-        }
-
-        if (evt == EVENT_START || evt == EVENT_RESUME) {
+    private function _handleSongEvent(songEvent as Media.SongEvent,
+                                      position as Number) as Void {
+        if (songEvent == Media.SONG_EVENT_START ||
+            songEvent == Media.SONG_EVENT_RESUME) {
+            _currentCompleted = false;
             _isPlaying = true;
-            _startPositionTimer();
+            _logPosition(position);
             PlaybackState.setPlaying(true);
-        } else if (evt == EVENT_PAUSE) {
+        } else if (songEvent == Media.SONG_EVENT_PLAYBACK_NOTIFY) {
+            _isPlaying = true;
+            _logPosition(position);
+            PlaybackState.setPlaying(true);
+        } else if (songEvent == Media.SONG_EVENT_PAUSE) {
             _isPlaying = false;
-            _stopPositionTimer();
             _logPosition(position);
             PlaybackState.setPlaying(false);
-        } else if (evt == EVENT_COMPLETE) {
+        } else if (songEvent == Media.SONG_EVENT_COMPLETE) {
             _isPlaying = false;
-            _stopPositionTimer();
-            _onEpisodeComplete();
+            _onEpisodeComplete(position);
+        } else if (songEvent == Media.SONG_EVENT_STOP) {
+            _isPlaying = false;
+            if (!_currentCompleted) {
+                _logPosition(position);
+            }
             PlaybackState.setPlaying(false);
-        } else if (evt == EVENT_STOP) {
-            _isPlaying = false;
-            _stopPositionTimer();
+        } else if (songEvent == Media.SONG_EVENT_SKIP_NEXT ||
+                   songEvent == Media.SONG_EVENT_SKIP_PREVIOUS ||
+                   songEvent == Media.SONG_EVENT_SKIP_FORWARD ||
+                   songEvent == Media.SONG_EVENT_SKIP_BACKWARD) {
+            _isPlaying = true;
             _logPosition(position);
-            PlaybackState.setPlaying(false);
+            PlaybackState.setPlaying(true);
         }
     }
 
@@ -160,7 +163,7 @@ class YoCastsContentDelegate extends Media.ContentDelegate {
     // ================================================================
 
     //! Called when the native player reaches the end of a track.
-    private function _onEpisodeComplete() as Void {
+    private function _onEpisodeComplete(position as Number) as Void {
         if (_currentUuid.length() == 0) { return; }
 
         System.println("YoCasts: episode completed " + _currentUuid);
@@ -174,11 +177,21 @@ class YoCastsContentDelegate extends Media.ContentDelegate {
 
         // Update cached position to full duration
         var duration = _getDuration();
-        if (duration > 0) {
-            CacheManager.savePlaybackPosition(_currentUuid, duration, duration);
-        }
-
-        PlaybackState.clear();
+        var completedPosition = duration > 0 ? duration : position;
+        var completedDuration = duration > 0 ? duration : position;
+        CacheManager.savePlaybackPosition(
+            _currentUuid,
+            completedPosition,
+            completedDuration
+        );
+        DownloadQueue.updatePlayback(
+            _currentUuid,
+            completedPosition,
+            DataKeys.STATUS_COMPLETED
+        );
+        _currentCompleted = true;
+        PlaybackState.updatePosition(completedPosition);
+        PlaybackState.setPlaying(false);
     }
 
     // ================================================================
@@ -196,34 +209,14 @@ class YoCastsContentDelegate extends Media.ContentDelegate {
         ChangeLog.logPositionUpdate(_currentUuid, podUuidStr,
                                      position, duration);
         CacheManager.savePlaybackPosition(_currentUuid, position, duration);
+        DownloadQueue.updatePlayback(
+            _currentUuid,
+            position,
+            DataKeys.STATUS_IN_PROGRESS
+        );
 
         // Keep PlaybackState in sync
         PlaybackState.updatePosition(position);
-    }
-
-    //! Start 15-second position logging timer.
-    private function _startPositionTimer() as Void {
-        _stopPositionTimer();
-        _positionTimer = new Timer.Timer();
-        (_positionTimer as Timer.Timer).start(
-            method(:onPositionLogTick), POSITION_LOG_INTERVAL_MS, true);
-    }
-
-    private function _stopPositionTimer() as Void {
-        if (_positionTimer != null) {
-            (_positionTimer as Timer.Timer).stop();
-            _positionTimer = null;
-        }
-    }
-
-    //! Timer callback — estimates position and logs it.
-    //! Between onSong events, we estimate position = last known + elapsed.
-    function onPositionLogTick() as Void {
-        if (!_isPlaying || _currentUuid.length() == 0) { return; }
-
-        // Use PlaybackState's estimated position (accounts for elapsed time)
-        var estimated = PlaybackState.getEstimatedPosition();
-        _logPosition(estimated);
     }
 
     // ================================================================
@@ -231,17 +224,33 @@ class YoCastsContentDelegate extends Media.ContentDelegate {
     // ================================================================
 
     //! Look up episode UUID from a ContentRef ID via StorageManager.
-    private function _resolveUuid(refId as String) as String {
+    private function _resolveUuid(refId as Object) as String {
         var downloads = StorageManager.getDownloadedEpisodes();
         for (var i = 0; i < downloads.size(); i++) {
             var d = downloads[i] as Dictionary;
             var r = d.get("refId");
-            if (r != null && (r as String).equals(refId)) {
+            if (r != null && (r as Object).equals(refId)) {
                 var uuid = d.get("episodeUuid");
                 return (uuid != null) ? uuid as String : "";
             }
         }
         return "";
+    }
+
+    private function _getResumeOffset(refId as Object) as Number {
+        if (_iterator != null) {
+            return (_iterator as YoCastsContentIterator)
+                .getResumeOffsetForRefId(refId);
+        }
+        if (_currentUuid.length() > 0) {
+            var cached = CacheManager.loadPlaybackPosition(_currentUuid);
+            if (cached != null) {
+                var position = (cached as Dictionary).get("position");
+                return (position != null && position instanceof Number)
+                    ? position as Number : 0;
+            }
+        }
+        return 0;
     }
 
     //! Get episode duration from DownloadQueue metadata.

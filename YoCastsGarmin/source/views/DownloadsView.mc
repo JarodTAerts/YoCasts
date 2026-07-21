@@ -1,11 +1,12 @@
 import Toybox.Lang;
+import Toybox.Application;
 import Toybox.WatchUi;
 import Toybox.Graphics;
 import Toybox.System;
 import Toybox.Timer;
 
 //! Downloads view — shows all downloaded and in-progress episodes.
-//! Custom View with 80px items, scrollable via swipe/buttons.
+//! Custom View with readable two-line items, scrollable via swipe/buttons.
 //! Uses podcast brand color tinting (same pattern as QueueView/EpisodeListView).
 class DownloadsView extends WatchUi.View {
 
@@ -16,16 +17,16 @@ class DownloadsView extends WatchUi.View {
     private var _podcasts as Array<Dictionary>?;
 
     // Layout constants matching HomeMenuView spec
-    private const ITEM_HEIGHT = 80;
+    private const ITEM_HEIGHT = 108;
     private const ITEM_GAP = 8;
-    private const ITEM_STRIDE = 88; // ITEM_HEIGHT + ITEM_GAP
+    private const ITEM_STRIDE = 116;
     private const ITEM_X = 40;
     private const ITEM_WIDTH = 310;
-    private const ITEM_CORNER_R = 14;
-    private const TITLE_Y_OFFSET = 80;
-    private const SCROLL_STEP = 88;
-    private const VISIBLE_TOP = 65;
-    private const VISIBLE_BOTTOM = 375;
+    private const ITEM_CORNER_R = 18;
+    private const TITLE_Y_OFFSET = 72;
+    private const SCROLL_STEP = 116;
+    private const VISIBLE_TOP = 62;
+    private const VISIBLE_BOTTOM = 378;
 
     function initialize() {
         View.initialize();
@@ -41,7 +42,7 @@ class DownloadsView extends WatchUi.View {
 
         // Title
         dc.setColor(0xAAAAAA, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(cx, 30, Graphics.FONT_MEDIUM, "Downloads",
+        dc.drawText(cx, 30, Graphics.FONT_TINY, "Downloads",
                     Graphics.TEXT_JUSTIFY_CENTER | Graphics.TEXT_JUSTIFY_VCENTER);
 
         if (downloads.size() == 0) {
@@ -112,7 +113,7 @@ class DownloadsView extends WatchUi.View {
 
         // Status icon on the left
         var iconX = x + 16;
-        var iconCY = y + 40;
+        var iconCY = y + ITEM_HEIGHT / 2;
         drawStatusIcon(dc, status, iconX, iconCY,
                        dl[DownloadQueue.DL_PROGRESS] as Number);
 
@@ -120,18 +121,50 @@ class DownloadsView extends WatchUi.View {
         var textX = x + 44;
         var maxTextW = ITEM_WIDTH - 60;
 
-        // Episode title — tinted brand color with contrast check
+        // Episode title — two stable lines are easier to scan than marquee text.
         var title = dl[DownloadQueue.DL_TITLE] as String;
         var titleColor = DataFormat.ensureContrast(artTint, bgColor);
         dc.setColor(titleColor, Graphics.COLOR_TRANSPARENT);
-        var truncTitle = DataFormat.truncateText(dc, title, Graphics.FONT_SMALL, maxTextW);
-        dc.drawText(textX, y + 14, Graphics.FONT_SMALL, truncTitle,
-                    Graphics.TEXT_JUSTIFY_LEFT);
+        var titleLines = DataFormat.wrapText(
+            dc,
+            title,
+            Graphics.FONT_XTINY,
+            maxTextW,
+            2
+        );
+        var titleH = dc.getFontHeight(Graphics.FONT_XTINY);
+        if (titleLines.size() > 0) {
+            dc.drawText(
+                textX,
+                y + 12,
+                Graphics.FONT_XTINY,
+                titleLines[0],
+                Graphics.TEXT_JUSTIFY_LEFT
+            );
+        }
+        if (titleLines.size() > 1) {
+            var secondLine = titleLines[1];
+            if (titleLines[0].length() + secondLine.length() + 1 <
+                title.length()) {
+                secondLine = DataFormat.truncateText(
+                    dc,
+                    secondLine + "...",
+                    Graphics.FONT_XTINY,
+                    maxTextW
+                );
+            }
+            dc.drawText(
+                textX,
+                y + 12 + titleH,
+                Graphics.FONT_XTINY,
+                secondLine,
+                Graphics.TEXT_JUSTIFY_LEFT
+            );
+        }
 
         // Podcast name + status (gray, bottom of pill)
         var podTitle = dl[DownloadQueue.DL_PODCAST_TITLE] as String;
         var statusStr = getStatusLabel(status, dl[DownloadQueue.DL_PROGRESS] as Number);
-        var subText = podTitle + " | " + statusStr;
 
         // Color-code the status portion
         var subColor = 0xAAAAAA;
@@ -141,26 +174,40 @@ class DownloadsView extends WatchUi.View {
             subColor = 0xFF5555;
         } else if (status == DownloadQueue.STATUS_DOWNLOADING) {
             subColor = 0x55AAFF;
+        } else if (status == DownloadQueue.STATUS_PENDING) {
+            subColor = 0xFFAA55;
         }
 
-        // Draw podcast title in dimmed tint, then status in its color
-        var subTintColor = DataFormat.dimColor(artTint, 0.6);
-        subTintColor = DataFormat.ensureContrast(subTintColor, bgColor);
-        dc.setColor(subTintColor, Graphics.COLOR_TRANSPARENT);
-        var truncPod = DataFormat.truncateText(dc, podTitle, Graphics.FONT_XTINY, maxTextW - 80);
-        dc.drawText(textX, y + 46, Graphics.FONT_XTINY, truncPod + " | ",
+        // Metadata is neutral so brand colors do not reduce readability.
+        dc.setColor(0xBBBBBB, Graphics.COLOR_TRANSPARENT);
+        var statusWidth = dc.getTextWidthInPixels(
+            statusStr,
+            Graphics.FONT_XTINY
+        );
+        var podcastWidth = maxTextW - statusWidth - 14;
+        if (podcastWidth < 50) { podcastWidth = 50; }
+        var truncPod = DataFormat.truncateText(
+            dc,
+            podTitle,
+            Graphics.FONT_XTINY,
+            podcastWidth
+        );
+        dc.drawText(textX, y + 78, Graphics.FONT_XTINY, truncPod,
                     Graphics.TEXT_JUSTIFY_LEFT);
 
-        // Status label overlaid after the pipe
-        var podPartW = dc.getTextWidthInPixels(truncPod + " | ", Graphics.FONT_XTINY);
         dc.setColor(subColor, Graphics.COLOR_TRANSPARENT);
-        dc.drawText(textX + podPartW, y + 46, Graphics.FONT_XTINY, statusStr,
-                    Graphics.TEXT_JUSTIFY_LEFT);
+        dc.drawText(
+            x + ITEM_WIDTH - 12,
+            y + 78,
+            Graphics.FONT_XTINY,
+            statusStr,
+            Graphics.TEXT_JUSTIFY_RIGHT
+        );
 
         // Progress bar for downloading items
         if (status == DownloadQueue.STATUS_DOWNLOADING) {
             var barX = textX;
-            var barY = y + 66;
+            var barY = y + 100;
             var barW = maxTextW - 10;
             var barH = 3;
             var progress = dl[DownloadQueue.DL_PROGRESS] as Number;
@@ -334,7 +381,31 @@ class DownloadsView extends WatchUi.View {
         _selectedIndex = idx;
         if (_selectedIndex < 0) { _selectedIndex = downloads.size() - 1; }
         if (_selectedIndex >= downloads.size()) { _selectedIndex = 0; }
+        var itemTop = TITLE_Y_OFFSET + _selectedIndex * ITEM_STRIDE;
+        var itemBottom = itemTop + ITEM_HEIGHT;
+        if (itemTop < _scrollOffset + VISIBLE_TOP) {
+            _scrollOffset = itemTop - VISIBLE_TOP;
+        } else if (itemBottom > _scrollOffset + VISIBLE_BOTTOM) {
+            _scrollOffset = itemBottom - VISIBLE_BOTTOM;
+        }
+        if (_scrollOffset < 0) { _scrollOffset = 0; }
+        var max = getMaxScroll(downloads.size());
+        if (_scrollOffset > max) { _scrollOffset = max; }
         WatchUi.requestUpdate();
+    }
+
+    function itemIndexAtY(y as Number) as Number {
+        if (y < VISIBLE_TOP || y > VISIBLE_BOTTOM) {
+            return -1;
+        }
+        var downloads = DownloadQueue.getDownloads();
+        for (var i = 0; i < downloads.size(); i++) {
+            var itemY = TITLE_Y_OFFSET + i * ITEM_STRIDE - _scrollOffset;
+            if (y >= itemY && y < itemY + ITEM_HEIGHT) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     //! Show a toast message that auto-dismisses after 1.5 seconds
@@ -378,14 +449,11 @@ class DownloadsDelegate extends WatchUi.InputDelegate {
             return false;
         }
 
-        var scrollOffset = _view.getScrollOffset();
-        for (var i = 0; i < downloads.size(); i++) {
-            var itemY = 80 + (i * 88) - scrollOffset;
-            if (tapY >= itemY && tapY < itemY + 80) {
-                _view.setSelectedIndex(i);
-                handleItemTap(i);
-                return true;
-            }
+        var index = _view.itemIndexAtY(tapY);
+        if (index >= 0) {
+            _view.setSelectedIndex(index);
+            handleItemTap(index);
+            return true;
         }
         return false;
     }
@@ -401,25 +469,12 @@ class DownloadsDelegate extends WatchUi.InputDelegate {
         var status = dl[DownloadQueue.DL_STATUS] as Number;
 
         if (status == DownloadQueue.STATUS_DOWNLOADED) {
-            // Build episode dict and load cached position for resume
-            var ep = DownloadQueue.toEpisodeDict(dl);
             var uuid = dl[DownloadQueue.DL_UUID] as String;
-            var cached = CacheManager.loadPlaybackPosition(uuid);
-            if (cached != null) {
-                var pos = (cached as Dictionary).get("position");
-                if (pos != null && pos instanceof Number) {
-                    ep.put(DataKeys.E_PLAYED_UP_TO, pos);
-                }
-            }
-
-            var npView = new NowPlayingView(ep);
-            var npDelegate = new NowPlayingDelegate(ep);
-            npDelegate.setView(npView);
-            WatchUi.pushView(npView, npDelegate, WatchUi.SLIDE_UP);
+            (Application.getApp() as YoCastsApp).requestPlayback(uuid);
         } else if (status == DownloadQueue.STATUS_FAILED) {
-            // Reset failed item to pending for retry on next sync
             var uuid = dl[DownloadQueue.DL_UUID] as String;
-            DownloadQueue.updateStatus(uuid, DownloadQueue.STATUS_PENDING);
+            DownloadQueue.retry(uuid);
+            (Application.getApp() as YoCastsApp).requestMediaSync();
             _view.showToast("Queued for retry");
         } else if (status == DownloadQueue.STATUS_DOWNLOADING) {
             _view.showToast("Downloading...");
@@ -479,8 +534,7 @@ class DownloadsDelegate extends WatchUi.InputDelegate {
         if (idx >= 0 && idx < downloads.size()) {
             var dl = downloads[idx] as Dictionary;
             var uuid = dl[DownloadQueue.DL_UUID] as String;
-            DownloadQueue.removeFromQueue(uuid);
-            StorageManager.removeDownload(uuid);
+            (Application.getApp() as YoCastsApp).deleteDownloadedEpisode(uuid);
 
             // Adjust selection if needed
             var newDownloads = DownloadQueue.getDownloads();

@@ -36,26 +36,35 @@ class PocketCastsPodcastService extends IPodcastService {
     private var _episodes as Dictionary = {} as Dictionary;
     private var _nowPlaying as Dictionary? = null;
     private var _dataReady as Boolean = false;
+    private var _loading as Boolean = false;
+    private var _lastError as String = "";
+    private var _podcastsLoaded as Boolean = false;
+    private var _queueLoaded as Boolean = false;
+    private var _changeSync as PocketCastsChangeSync?;
+    private var _fetchAfterChangeSync as Boolean = false;
 
     // ---- Queue Enrichment Pipeline State ----
     private var _queueEnrichIndex as Number = 0;
+    private var _queueEnrichRetried as Boolean = false;
 
     // ---- Token Refresh Serialization ----
     // Prevents concurrent token-refresh + API request (CIQ -402 race condition).
     // When a refresh is in-flight, the API call is queued and replayed after
     // the refresh completes with the new token.
     private var _tokenRefreshInProgress as Boolean = false;
+    private var _loginInProgress as Boolean = false;
+    private var _syncAfterAuth as Boolean = false;
     private var _pendingRequestPath as String = "";
     private var _pendingRequestBody as Dictionary<Object, Object>? = null;
     private var _pendingRequestCallback as Method? = null;
 
     // ---- Episode Fetch Pipeline State ----
     private var _pendingEpPodcastUuid as String = "";
-    private var _pendingEpUserState as Array<Dictionary> = [] as Array<Dictionary>;
-    private var _pendingEpDetails as Array<Dictionary> = [] as Array<Dictionary>;
-    private var _pendingEpIndex as Number = 0;
     private var _episodeFetchBusy as Boolean = false;
     private var _episodeRetried as Boolean = false;
+    private var _episodeDetails as Dictionary = {} as Dictionary;
+    private var _pendingDetailUuid as String = "";
+    private var _queuedDetailUuid as String = "";
 
     // ---- Constants ----
     // Direct PocketCasts API — used ONLY for login and token refresh
@@ -93,6 +102,22 @@ class PocketCastsPodcastService extends IPodcastService {
         return _dataReady;
     }
 
+    function isLoading() as Boolean {
+        return _loading;
+    }
+
+    function getLastError() as String {
+        return _lastError;
+    }
+
+    function hasLoadedPodcasts() as Boolean {
+        return _podcastsLoaded;
+    }
+
+    function hasLoadedQueue() as Boolean {
+        return _queueLoaded;
+    }
+
     // ================================================================
     // IPodcastService — synchronous cache getters
     // ================================================================
@@ -109,12 +134,22 @@ class PocketCastsPodcastService extends IPodcastService {
         return [] as Array<Dictionary>;
     }
 
+    function hasEpisodesForPodcast(podcastUuid as String) as Boolean {
+        return _episodes.hasKey(podcastUuid);
+    }
+
     function getQueue() as Array<Dictionary> {
         return _queue;
     }
 
     function getNowPlaying() as Dictionary? {
         return _nowPlaying;
+    }
+
+    function getEpisodeDetails(episodeUuid as String) as Dictionary? {
+        var details = _episodeDetails.get(episodeUuid);
+        return (details != null && details instanceof Dictionary)
+            ? details as Dictionary : null;
     }
 
     // ================================================================
@@ -124,6 +159,11 @@ class PocketCastsPodcastService extends IPodcastService {
     //! Start the full data pipeline: login → podcasts → queue → enrich
     function fetchAll() as Void {
         System.println("YoCasts: fetchAll() — starting login");
+        _loading = true;
+        _dataReady = false;
+        _lastError = "";
+        _podcastsLoaded = false;
+        _queueLoaded = false;
         _login();
     }
 
@@ -138,10 +178,59 @@ class PocketCastsPodcastService extends IPodcastService {
         _episodeFetchBusy = true;
         _pendingEpPodcastUuid = podcastUuid;
         _makeAuthPost(
-            "/user/podcast/episodes",
+            "/yocasts/podcast/episodes",
             { "uuid" => podcastUuid },
             method(:onEpisodeListResponse)
         );
+    }
+
+    function requestEpisodeDetails(episodeUuid as String) as Void {
+        if (!_authenticated) {
+            _queuedDetailUuid = episodeUuid;
+            _login();
+            return;
+        }
+        if (_pendingDetailUuid.length() > 0) {
+            if (!_pendingDetailUuid.equals(episodeUuid)) {
+                _queuedDetailUuid = episodeUuid;
+            }
+            return;
+        }
+        _pendingDetailUuid = episodeUuid;
+        System.println(
+            "YoCasts: fetching extended episode details " + episodeUuid
+        );
+        _makeAuthPost(
+            "/yocasts/episode/details",
+            { "uuid" => episodeUuid },
+            method(:onExtendedEpisodeResponse)
+        );
+    }
+
+    function onExtendedEpisodeResponse(
+        responseCode as Number,
+        data as Dictionary or String or Null
+    ) as Void {
+        var uuid = _pendingDetailUuid;
+        _pendingDetailUuid = "";
+        var nextUuid = _queuedDetailUuid;
+        _queuedDetailUuid = "";
+        System.println(
+            "YoCasts: extended episode response " + responseCode
+        );
+        if (responseCode == 200 && data != null &&
+            data instanceof Dictionary && uuid.length() > 0) {
+            var details = _transformEpisodeDetail(
+                data as Dictionary,
+                uuid,
+                ""
+            );
+            _episodeDetails.put(uuid, details);
+            WatchUi.requestUpdate();
+        }
+        if (nextUuid.length() > 0 && !nextUuid.equals(uuid)) {
+            requestEpisodeDetails(nextUuid);
+        }
     }
 
     // ================================================================
@@ -149,6 +238,8 @@ class PocketCastsPodcastService extends IPodcastService {
     // ================================================================
 
     private function _login() as Void {
+        if (_loginInProgress) { return; }
+        _loginInProgress = true;
         System.println("YoCasts: POST /user/login_pocket_casts");
         Communications.makeWebRequest(
             API_BASE + "/user/login_pocket_casts",
@@ -170,6 +261,7 @@ class PocketCastsPodcastService extends IPodcastService {
 
     //! @hide (public only because makeWebRequest requires it)
     function onLoginResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
+        _loginInProgress = false;
         if (responseCode == 200 && data != null && data instanceof Dictionary) {
             var dict = data as Dictionary;
             var at = dict.get("accessToken");
@@ -184,15 +276,92 @@ class PocketCastsPodcastService extends IPodcastService {
                 _authenticated = true;
                 System.println("YoCasts: login SUCCESS — token expires in " + ei + "s");
 
-                // Chain → fetch podcasts
-                _fetchPodcasts();
+                if (_pendingRequestCallback != null) {
+                    _replayPendingRequest();
+                } else if (_syncAfterAuth) {
+                    _syncAfterAuth = false;
+                    _syncPendingChanges(false);
+                } else {
+                    _syncPendingChanges(true);
+                }
             } else {
                 System.println("YoCasts: login response missing expected fields");
+                _lastError = "Invalid login response";
+                _clearPendingRequest();
                 _markDataReady();
             }
         } else {
             System.println("YoCasts: login FAILED — HTTP " + responseCode);
+            _lastError = "Pocket Casts login failed";
+            _clearPendingRequest();
             _markDataReady();
+        }
+    }
+
+    // ================================================================
+    // Cached mutation sync
+    // ================================================================
+
+    function syncPendingChanges() as Void {
+        if (_changeSync != null || ChangeLog.getEntryCount() == 0 ||
+            _episodeFetchBusy || _pendingDetailUuid.length() > 0 ||
+            _queueEnrichIndex < _queue.size()) {
+            return;
+        }
+        if (!_authenticated) {
+            _syncAfterAuth = true;
+            _login();
+            return;
+        }
+        if (_tokenRefreshInProgress) {
+            _syncAfterAuth = true;
+            return;
+        }
+        if (_isTokenExpiringSoon()) {
+            _syncAfterAuth = true;
+            _doTokenRefresh();
+            return;
+        }
+        _syncPendingChanges(false);
+    }
+
+    private function _syncPendingChanges(fetchAfter as Boolean) as Void {
+        _fetchAfterChangeSync = fetchAfter;
+        if (ChangeLog.getEntryCount() == 0) {
+            if (fetchAfter) { _fetchPodcasts(); }
+            return;
+        }
+
+        System.println("YoCasts: syncing cached playback/queue changes");
+        _changeSync = new PocketCastsChangeSync(
+            _accessToken,
+            method(:onPendingChangesSynced)
+        );
+        (_changeSync as PocketCastsChangeSync).start();
+    }
+
+    function onPendingChangesSynced(failures as Number) as Void {
+        var authenticationFailed = _changeSync != null &&
+            (_changeSync as PocketCastsChangeSync)
+                .hadAuthenticationFailure();
+        _changeSync = null;
+        if (authenticationFailed) {
+            _authenticated = false;
+            _syncAfterAuth = true;
+            _login();
+            return;
+        }
+        if (failures > 0) {
+            System.println(
+                "YoCasts: " + failures + " cached changes remain pending"
+            );
+        }
+        if (_fetchAfterChangeSync) {
+            _fetchAfterChangeSync = false;
+            _fetchPodcasts();
+        } else {
+            WatchUi.requestUpdate();
+            _startQueuedDetailIfIdle();
         }
     }
 
@@ -240,18 +409,26 @@ class PocketCastsPodcastService extends IPodcastService {
                 _refreshToken = rt as String;
                 _tokenExpiresAt = Time.now().value() + (ei as Number);
                 System.println("YoCasts: token refresh SUCCESS");
+                if (_pendingRequestCallback != null) {
+                    _replayPendingRequest();
+                } else if (_syncAfterAuth) {
+                    _syncAfterAuth = false;
+                    _syncPendingChanges(false);
+                }
+                return;
             } else {
                 _authenticated = false;
-                System.println("YoCasts: token refresh response missing fields, will re-login");
+                System.println("YoCasts: token refresh response missing fields");
             }
         } else {
-            // Refresh failed — force re-login on next request
             _authenticated = false;
-            System.println("YoCasts: token refresh FAILED — HTTP " + responseCode + ", will re-login");
+            System.println("YoCasts: token refresh FAILED — HTTP " + responseCode);
         }
 
-        // Replay the queued API request now that the token is updated
-        _replayPendingRequest();
+        _accessToken = "";
+        _refreshToken = "";
+        _tokenExpiresAt = 0;
+        _login();
     }
 
     // ================================================================
@@ -281,6 +458,7 @@ class PocketCastsPodcastService extends IPodcastService {
                 }
                 System.println("YoCasts: loaded " + _podcasts.size() + " podcasts");
             }
+            _podcastsLoaded = true;
             WatchUi.requestUpdate();
 
             // Chain → fetch queue
@@ -291,6 +469,7 @@ class PocketCastsPodcastService extends IPodcastService {
             _login();
         } else {
             System.println("YoCasts: podcast list FAILED — HTTP " + responseCode);
+            _lastError = "Could not load podcasts";
             // Continue to queue fetch so UI isn't stuck
             _fetchQueue();
         }
@@ -356,7 +535,12 @@ class PocketCastsPodcastService extends IPodcastService {
                             DataKeys.E_PODCAST_UUID => podUuid,
                             DataKeys.E_PODCAST_TITLE => _lookupPodcastTitle(podUuid),
                             DataKeys.E_STARRED => false,
-                            DataKeys.E_IS_DELETED => false
+                            DataKeys.E_IS_DELETED => false,
+                            DataKeys.E_SUMMARY => "",
+                            DataKeys.E_PUBLISHED => "",
+                            DataKeys.E_URL => "",
+                            DataKeys.E_FILE_TYPE => "",
+                            DataKeys.E_SIZE => ""
                         } as Dictionary);
                     }
                 }
@@ -367,6 +551,7 @@ class PocketCastsPodcastService extends IPodcastService {
             }
 
             System.println("YoCasts: loaded " + _queue.size() + " queue items");
+            _queueLoaded = true;
             _markDataReady();
 
             // Chain → enrich queue items with duration/progress
@@ -379,7 +564,9 @@ class PocketCastsPodcastService extends IPodcastService {
         } else {
             // Queue fetch failed — mark ready anyway so UI isn't stuck
             System.println("YoCasts: queue fetch FAILED — HTTP " + responseCode);
+            _lastError = "Could not load Up Next";
             _markDataReady();
+            _startQueuedDetailIfIdle();
         }
     }
 
@@ -390,6 +577,14 @@ class PocketCastsPodcastService extends IPodcastService {
     private function _enrichNextQueueItem() as Void {
         if (_queueEnrichIndex >= _queue.size()) {
             System.println("YoCasts: queue enrichment complete");
+            CacheManager.saveQueue(_queue);
+            var added = AutoSyncManager.reconcileQueue(_queue, true);
+            if (added > 0) {
+                System.println(
+                    "YoCasts: auto-queued " + added + " Up Next episodes"
+                );
+            }
+            _startQueuedDetailIfIdle();
             WatchUi.requestUpdate();
             return;
         }
@@ -401,6 +596,7 @@ class PocketCastsPodcastService extends IPodcastService {
     //! @hide
     function onQueueEnrichResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
         if (responseCode == 200 && data != null && data instanceof Dictionary) {
+            _queueEnrichRetried = false;
             var d = data as Dictionary;
             if (_queueEnrichIndex < _queue.size()) {
                 var ep = _queue[_queueEnrichIndex] as Dictionary;
@@ -422,41 +618,64 @@ class PocketCastsPodcastService extends IPodcastService {
                 if (d.get("starred") != null) {
                     ep.put(DataKeys.E_STARRED, d.get("starred") as Boolean);
                 }
+                ep.put(
+                    DataKeys.E_SUMMARY,
+                    _strOr(d.get("summary"), "")
+                );
+                ep.put(
+                    DataKeys.E_PUBLISHED,
+                    _strOr(d.get("published"), "")
+                );
+                ep.put(DataKeys.E_URL, _strOr(d.get("url"), ""));
+                ep.put(
+                    DataKeys.E_FILE_TYPE,
+                    _strOr(d.get("fileType"), "")
+                );
+                ep.put(DataKeys.E_SIZE, _strOr(d.get("size"), ""));
                 // Update now playing if first queue item
                 if (_queueEnrichIndex == 0) {
                     _nowPlaying = ep;
-                    // Seed PlaybackState so the Home dock shows the current episode
-                    var epUuid = ep.get(DataKeys.E_UUID) as String;
-                    var epPodUuid = ep.get(DataKeys.E_PODCAST_UUID) as String;
-                    var epTitle = ep.get(DataKeys.E_TITLE) as String;
-                    var epPodTitle = ep.get(DataKeys.E_PODCAST_TITLE) as String;
-                    var epPos = ep.get(DataKeys.E_PLAYED_UP_TO) as Number;
-                    var epDur = ep.get(DataKeys.E_DURATION) as Number;
-                    System.println("YoCasts: seeding PlaybackState from queue[0]: '" + epTitle + "' pos=" + epPos + " dur=" + epDur);
-                    PlaybackState.update(epUuid, epPodUuid, epTitle, epPodTitle, epPos, epDur, false);
                 }
             }
         } else if (responseCode == 401) {
-            System.println("YoCasts: queue enrich 401 — stopping enrichment");
-            WatchUi.requestUpdate();
-            return;
+            if (!_queueEnrichRetried &&
+                _queueEnrichIndex < _queue.size()) {
+                _queueEnrichRetried = true;
+                var retryEpisode =
+                    _queue[_queueEnrichIndex] as Dictionary;
+                var retryUuid = retryEpisode.get(DataKeys.E_UUID) as String;
+                _pendingRequestPath = "/user/episode";
+                _pendingRequestBody = {
+                    "uuid" => retryUuid
+                } as Dictionary<Object, Object>;
+                _pendingRequestCallback = method(:onQueueEnrichResponse);
+                if (_refreshToken.length() > 0) {
+                    _doTokenRefresh();
+                } else {
+                    _authenticated = false;
+                    _login();
+                }
+                return;
+            }
+            _queueEnrichRetried = false;
+            System.println(
+                "YoCasts: queue enrich authentication retry failed"
+            );
         } else if (responseCode == -402) {
-            // CIQ concurrent request limit — stop enrichment, keep what we have
-            System.println("YoCasts: queue enrich -402 (too many requests) — stopping enrichment");
-            WatchUi.requestUpdate();
-            return;
+            System.println(
+                "YoCasts: queue enrich response too large; skipping item"
+            );
         } else {
             System.println("YoCasts: queue enrich failed for item " + _queueEnrichIndex + " — HTTP " + responseCode);
         }
 
+        _queueEnrichRetried = false;
         _queueEnrichIndex++;
         _enrichNextQueueItem();
     }
 
     // ================================================================
-    // Episode List Fetch (on-demand, two-stage pipeline)
-    // Stage 1: /user/podcast/episodes → lightweight list (no titles)
-    // Stage 2: /user/episode per item → full metadata
+    // Episode List Fetch (server-capped and enriched by the proxy)
     // ================================================================
 
     //! @hide
@@ -466,17 +685,25 @@ class PocketCastsPodcastService extends IPodcastService {
             var raw = dict.get("episodes");
             if (raw != null && raw instanceof Array) {
                 var arr = raw as Array;
-                _pendingEpUserState = [] as Array<Dictionary>;
-                var limit = arr.size() < MAX_EPISODES ? arr.size() : MAX_EPISODES;
+                var details = [] as Array<Dictionary>;
+                var limit = arr.size() < MAX_EPISODES
+                    ? arr.size() : MAX_EPISODES;
                 for (var i = 0; i < limit; i++) {
-                    _pendingEpUserState.add(arr[i] as Dictionary);
+                    var episode = arr[i] as Dictionary;
+                    details.add(_transformEpisodeDetail(
+                        episode,
+                        _strOr(episode.get("uuid"), ""),
+                        _pendingEpPodcastUuid
+                    ));
                 }
-                System.println("YoCasts: episode list returned " + _pendingEpUserState.size() + " items, fetching details");
+                _episodes.put(_pendingEpPodcastUuid, details);
+                _episodeFetchBusy = false;
                 _episodeRetried = false;
-
-                _pendingEpDetails = [] as Array<Dictionary>;
-                _pendingEpIndex = 0;
-                _fetchNextEpisodeDetail();
+                System.println(
+                    "YoCasts: loaded " + details.size() +
+                    " compact episode details"
+                );
+                WatchUi.requestUpdate();
                 return;
             }
         }
@@ -484,78 +711,33 @@ class PocketCastsPodcastService extends IPodcastService {
         _episodeFetchBusy = false;
         if (responseCode == 401) {
             if (!_episodeRetried) {
-                // Token was likely stale when request fired — retry once with fresh token
                 System.println("YoCasts: episode list 401 — retrying with refreshed token");
                 _episodeRetried = true;
-                requestEpisodesForPodcast(_pendingEpPodcastUuid);
+                _episodeFetchBusy = true;
+                _pendingRequestPath = "/yocasts/podcast/episodes";
+                _pendingRequestBody = {
+                    "uuid" => _pendingEpPodcastUuid
+                } as Dictionary<Object, Object>;
+                _pendingRequestCallback = method(:onEpisodeListResponse);
+                if (_refreshToken.length() > 0) {
+                    _doTokenRefresh();
+                } else {
+                    _authenticated = false;
+                    _login();
+                }
                 return;
             }
             _episodeRetried = false;
             System.println("YoCasts: episode list 401 — retry also failed, giving up");
         } else if (responseCode == -402) {
-            // CIQ concurrent request limit hit — reset so next onUpdate cycle retries
-            System.println("YoCasts: episode list -402 (too many requests) — will retry on next cycle");
+            System.println(
+                "YoCasts: compact episode response exceeded device limit"
+            );
+            _lastError = "Episode response too large";
         } else {
             System.println("YoCasts: episode list FAILED — HTTP " + responseCode);
+            _lastError = "Could not load episodes";
         }
-    }
-
-    private function _fetchNextEpisodeDetail() as Void {
-        if (_pendingEpIndex >= _pendingEpUserState.size()) {
-            // All details fetched — cache and notify
-            _episodes.put(_pendingEpPodcastUuid, _pendingEpDetails);
-            _episodeFetchBusy = false;
-            WatchUi.requestUpdate();
-            return;
-        }
-        var st = _pendingEpUserState[_pendingEpIndex] as Dictionary;
-        var uuid = _strOr(st.get("uuid"), "");
-        if (uuid.equals("")) {
-            _pendingEpIndex++;
-            _fetchNextEpisodeDetail();
-            return;
-        }
-        _makeAuthPost("/user/episode", { "uuid" => uuid }, method(:onEpisodeDetailResponse));
-    }
-
-    //! @hide
-    function onEpisodeDetailResponse(responseCode as Number, data as Dictionary or String or Null) as Void {
-        if (responseCode == 200 && data != null && data instanceof Dictionary) {
-            var d = data as Dictionary;
-            var userState = _pendingEpUserState[_pendingEpIndex] as Dictionary;
-            _pendingEpDetails.add({
-                DataKeys.E_UUID => _strOr(d.get("uuid"), _strOr(userState.get("uuid"), "")),
-                DataKeys.E_TITLE => _strOr(d.get("title"), "Episode"),
-                DataKeys.E_DURATION => d.get("duration") != null ? d.get("duration") as Number : 0,
-                DataKeys.E_PLAYED_UP_TO => userState.get("playedUpTo") != null ? userState.get("playedUpTo") as Number : 0,
-                DataKeys.E_PLAYING_STATUS => userState.get("playingStatus") != null ? userState.get("playingStatus") as Number : 0,
-                DataKeys.E_PODCAST_UUID => _pendingEpPodcastUuid,
-                DataKeys.E_PODCAST_TITLE => _lookupPodcastTitle(_pendingEpPodcastUuid),
-                DataKeys.E_STARRED => userState.get("starred") != null ? userState.get("starred") as Boolean : false,
-                DataKeys.E_IS_DELETED => userState.get("isDeleted") != null ? userState.get("isDeleted") as Boolean : false
-            } as Dictionary);
-        } else if (responseCode == 401) {
-            System.println("YoCasts: episode detail 401 — stopping fetch pipeline");
-            // Save what we have so far
-            if (_pendingEpDetails.size() > 0) {
-                _episodes.put(_pendingEpPodcastUuid, _pendingEpDetails);
-            }
-            _episodeFetchBusy = false;
-            WatchUi.requestUpdate();
-            return;
-        } else if (responseCode == -402) {
-            // CIQ concurrent request limit — save partial results and let next cycle retry
-            System.println("YoCasts: episode detail -402 (too many requests) — saving " + _pendingEpDetails.size() + " partial results");
-            if (_pendingEpDetails.size() > 0) {
-                _episodes.put(_pendingEpPodcastUuid, _pendingEpDetails);
-            }
-            _episodeFetchBusy = false;
-            WatchUi.requestUpdate();
-            return;
-        }
-
-        _pendingEpIndex++;
-        _fetchNextEpisodeDetail();
     }
 
     // ================================================================
@@ -623,9 +805,26 @@ class PocketCastsPodcastService extends IPodcastService {
         _makeAuthPost(path, body, cb);
     }
 
+    private function _clearPendingRequest() as Void {
+        _pendingRequestPath = "";
+        _pendingRequestBody = null;
+        _pendingRequestCallback = null;
+    }
+
+    private function _startQueuedDetailIfIdle() as Void {
+        if (!_authenticated || _pendingDetailUuid.length() > 0 ||
+            _queuedDetailUuid.length() == 0) {
+            return;
+        }
+        var nextUuid = _queuedDetailUuid;
+        _queuedDetailUuid = "";
+        requestEpisodeDetails(nextUuid);
+    }
+
     //! Mark data as ready and request UI update
     private function _markDataReady() as Void {
         _dataReady = true;
+        _loading = false;
         WatchUi.requestUpdate();
     }
 
@@ -646,5 +845,53 @@ class PocketCastsPodcastService extends IPodcastService {
             return val as String;
         }
         return fallback;
+    }
+
+    private function _transformEpisodeDetail(
+        data as Dictionary,
+        fallbackUuid as String,
+        podcastUuid as String
+    ) as Dictionary {
+        var actualPodcastUuid = podcastUuid.length() > 0
+            ? podcastUuid
+            : _strOr(data.get("podcastUuid"), "");
+        return {
+            DataKeys.E_UUID =>
+                _strOr(data.get("uuid"), fallbackUuid),
+            DataKeys.E_TITLE =>
+                _strOr(data.get("title"), "Episode"),
+            DataKeys.E_DURATION =>
+                (data.get("duration") != null &&
+                 data.get("duration") instanceof Number)
+                    ? data.get("duration") as Number : 0,
+            DataKeys.E_PLAYED_UP_TO =>
+                (data.get("playedUpTo") != null &&
+                 data.get("playedUpTo") instanceof Number)
+                    ? data.get("playedUpTo") as Number : 0,
+            DataKeys.E_PLAYING_STATUS =>
+                (data.get("playingStatus") != null &&
+                 data.get("playingStatus") instanceof Number)
+                    ? data.get("playingStatus") as Number
+                    : DataKeys.STATUS_NOT_PLAYED,
+            DataKeys.E_PODCAST_UUID => actualPodcastUuid,
+            DataKeys.E_PODCAST_TITLE =>
+                _strOr(
+                    data.get("podcastTitle"),
+                    _lookupPodcastTitle(actualPodcastUuid)
+                ),
+            DataKeys.E_STARRED =>
+                (data.get("starred") != null &&
+                 data.get("starred") instanceof Boolean)
+                    ? data.get("starred") as Boolean : false,
+            DataKeys.E_IS_DELETED =>
+                (data.get("isDeleted") != null &&
+                 data.get("isDeleted") instanceof Boolean)
+                    ? data.get("isDeleted") as Boolean : false,
+            DataKeys.E_SUMMARY => _strOr(data.get("summary"), ""),
+            DataKeys.E_PUBLISHED => _strOr(data.get("published"), ""),
+            DataKeys.E_URL => _strOr(data.get("url"), ""),
+            DataKeys.E_FILE_TYPE => _strOr(data.get("fileType"), ""),
+            DataKeys.E_SIZE => _strOr(data.get("size"), "")
+        } as Dictionary;
     }
 }

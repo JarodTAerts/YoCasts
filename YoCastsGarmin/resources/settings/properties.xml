@@ -2,4 +2,5 @@
     <property id="PocketCastsEmail" type="string"></property>
     <property id="PocketCastsPassword" type="string"></property>
     <property id="useMockData" type="boolean">false</property>
+    <property id="AutoDownloadCount" type="number">3</property>
 </properties>

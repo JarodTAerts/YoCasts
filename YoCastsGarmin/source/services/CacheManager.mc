@@ -15,6 +15,13 @@ module CacheManager {
     const KEY_QUEUE = "yc_queue";
     const KEY_EPISODES_PREFIX = "yc_episodes_";
     const KEY_POSITION_PREFIX = "yc_pos_";
+    const KEY_DETAIL_PREFIX = "yc_detail_";
+    const KEY_EPISODE_CACHE_INDEX = "yc_episode_cache_index";
+    const KEY_DETAIL_CACHE_INDEX = "yc_detail_cache_index";
+    const KEY_POSITION_CACHE_INDEX = "yc_position_cache_index";
+    const MAX_EPISODE_CACHES = 10;
+    const MAX_DETAIL_CACHES = 5;
+    const MAX_POSITION_CACHES = 30;
 
     // ================================================================
     // Podcasts
@@ -54,6 +61,7 @@ module CacheManager {
             "cachedAt" => Time.now().value() as Application.Storage.ValueType
         };
         Application.Storage.setValue(key, entry as Application.Storage.ValueType);
+        _touchEpisodeCache(podcastUuid);
     }
 
     //! Load cached episodes for a podcast. Returns null if no cache.
@@ -65,6 +73,36 @@ module CacheManager {
             var data = dict.get("data");
             if (data != null && data instanceof Array) {
                 return data as Array<Dictionary>;
+            }
+        }
+        return null;
+    }
+
+    // ================================================================
+    // Extended episode details (per episode)
+    // ================================================================
+
+    function saveEpisodeDetails(episodeUuid as String,
+                                details as Dictionary) as Void {
+        var entry = {
+            "data" => details as Application.Storage.ValueType,
+            "cachedAt" => Time.now().value() as Application.Storage.ValueType
+        } as Dictionary;
+        Application.Storage.setValue(
+            KEY_DETAIL_PREFIX + episodeUuid,
+            entry as Application.Storage.ValueType
+        );
+        _touchDetailCache(episodeUuid);
+    }
+
+    function loadEpisodeDetails(episodeUuid as String) as Dictionary? {
+        var entry = Application.Storage.getValue(
+            KEY_DETAIL_PREFIX + episodeUuid
+        );
+        if (entry != null && entry instanceof Dictionary) {
+            var data = (entry as Dictionary).get("data");
+            if (data != null && data instanceof Dictionary) {
+                return data as Dictionary;
             }
         }
         return null;
@@ -110,6 +148,7 @@ module CacheManager {
             "cachedAt" => Time.now().value() as Application.Storage.ValueType
         };
         Application.Storage.setValue(key, entry as Application.Storage.ValueType);
+        _touchPositionCache(episodeUuid);
     }
 
     //! Load cached playback position. Returns Dictionary with "position",
@@ -121,6 +160,25 @@ module CacheManager {
             return entry as Dictionary;
         }
         return null;
+    }
+
+    function removePlaybackPosition(episodeUuid as String) as Void {
+        Application.Storage.deleteValue(KEY_POSITION_PREFIX + episodeUuid);
+        var existing = _loadStringIndex(KEY_POSITION_CACHE_INDEX);
+        var updated = [] as Array<String>;
+        for (var i = 0; i < existing.size(); i++) {
+            if (!existing[i].equals(episodeUuid)) {
+                updated.add(existing[i]);
+            }
+        }
+        if (updated.size() == 0) {
+            Application.Storage.deleteValue(KEY_POSITION_CACHE_INDEX);
+        } else {
+            Application.Storage.setValue(
+                KEY_POSITION_CACHE_INDEX,
+                updated as Application.Storage.ValueType
+            );
+        }
     }
 
     // ================================================================
@@ -147,8 +205,99 @@ module CacheManager {
     function clearCache() as Void {
         Application.Storage.deleteValue(KEY_PODCASTS);
         Application.Storage.deleteValue(KEY_QUEUE);
-        // Per-podcast episode caches (KEY_EPISODES_PREFIX + uuid) are not
-        // tracked centrally — they will be overwritten on next fetch.
+        var index = _loadEpisodeCacheIndex();
+        for (var i = 0; i < index.size(); i++) {
+            Application.Storage.deleteValue(
+                KEY_EPISODES_PREFIX + index[i]
+            );
+        }
+        Application.Storage.deleteValue(KEY_EPISODE_CACHE_INDEX);
+        var detailIndex = _loadStringIndex(KEY_DETAIL_CACHE_INDEX);
+        for (var i = 0; i < detailIndex.size(); i++) {
+            Application.Storage.deleteValue(
+                KEY_DETAIL_PREFIX + detailIndex[i]
+            );
+        }
+        Application.Storage.deleteValue(KEY_DETAIL_CACHE_INDEX);
         // Per-episode position caches are left intact for sync.
+    }
+
+    function _touchEpisodeCache(podcastUuid as String) as Void {
+        var existing = _loadEpisodeCacheIndex();
+        var updated = [] as Array<String>;
+        for (var i = 0; i < existing.size(); i++) {
+            if (!existing[i].equals(podcastUuid)) {
+                updated.add(existing[i]);
+            }
+        }
+        updated.add(podcastUuid);
+
+        while (updated.size() > MAX_EPISODE_CACHES) {
+            var oldest = updated[0];
+            Application.Storage.deleteValue(KEY_EPISODES_PREFIX + oldest);
+            updated = updated.slice(1, null) as Array<String>;
+        }
+
+        Application.Storage.setValue(
+            KEY_EPISODE_CACHE_INDEX,
+            updated as Application.Storage.ValueType
+        );
+    }
+
+    function _loadEpisodeCacheIndex() as Array<String> {
+        var value = Application.Storage.getValue(KEY_EPISODE_CACHE_INDEX);
+        if (value != null && value instanceof Array) {
+            return value as Array<String>;
+        }
+        return [] as Array<String>;
+    }
+
+    function _touchDetailCache(episodeUuid as String) as Void {
+        var existing = _loadStringIndex(KEY_DETAIL_CACHE_INDEX);
+        var updated = [] as Array<String>;
+        for (var i = 0; i < existing.size(); i++) {
+            if (!existing[i].equals(episodeUuid)) {
+                updated.add(existing[i]);
+            }
+        }
+        updated.add(episodeUuid);
+        while (updated.size() > MAX_DETAIL_CACHES) {
+            Application.Storage.deleteValue(
+                KEY_DETAIL_PREFIX + updated[0]
+            );
+            updated = updated.slice(1, null) as Array<String>;
+        }
+        Application.Storage.setValue(
+            KEY_DETAIL_CACHE_INDEX,
+            updated as Application.Storage.ValueType
+        );
+    }
+
+    function _touchPositionCache(episodeUuid as String) as Void {
+        var existing = _loadStringIndex(KEY_POSITION_CACHE_INDEX);
+        var updated = [] as Array<String>;
+        for (var i = 0; i < existing.size(); i++) {
+            if (!existing[i].equals(episodeUuid)) {
+                updated.add(existing[i]);
+            }
+        }
+        updated.add(episodeUuid);
+        while (updated.size() > MAX_POSITION_CACHES) {
+            Application.Storage.deleteValue(
+                KEY_POSITION_PREFIX + updated[0]
+            );
+            updated = updated.slice(1, null) as Array<String>;
+        }
+        Application.Storage.setValue(
+            KEY_POSITION_CACHE_INDEX,
+            updated as Application.Storage.ValueType
+        );
+    }
+
+    function _loadStringIndex(key as String) as Array<String> {
+        var value = Application.Storage.getValue(key);
+        return (value != null && value instanceof Array)
+            ? value as Array<String>
+            : [] as Array<String>;
     }
 }

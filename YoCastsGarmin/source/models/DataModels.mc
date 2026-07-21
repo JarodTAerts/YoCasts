@@ -22,6 +22,7 @@ module DataKeys {
     const E_DURATION = "duration";
     const E_FILE_TYPE = "fileType";
     const E_SIZE = "size";
+    const E_SUMMARY = "summary";
     const E_PLAYED_UP_TO = "playedUpTo";
     const E_STARRED = "starred";
     const E_PODCAST_UUID = "podcastUuid";
@@ -191,5 +192,51 @@ module DataFormat {
             return ellipsis;
         }
         return (text.substring(0, best) as String) + ellipsis;
+    }
+
+    //! Wrap text into pixel-measured lines for watch detail views.
+    function wrapText(dc as Graphics.Dc, text as String,
+                      font as Graphics.FontDefinition, maxWidth as Number,
+                      maxLines as Number) as Array<String> {
+        var lines = [] as Array<String>;
+        var current = "";
+        var word = "";
+
+        for (var i = 0; i <= text.length(); i++) {
+            var atEnd = i == text.length();
+            var ch = atEnd ? "" : text.substring(i, i + 1) as String;
+            var delimiter = atEnd || ch.equals(" ") || ch.equals("\n") ||
+                            ch.equals("\r") || ch.equals("\t");
+            if (!delimiter) {
+                word += ch;
+                continue;
+            }
+
+            if (word.length() > 0) {
+                var candidate = current.length() == 0
+                    ? word : current + " " + word;
+                if (dc.getTextWidthInPixels(candidate, font) <= maxWidth) {
+                    current = candidate;
+                } else {
+                    if (current.length() > 0) {
+                        lines.add(current);
+                    }
+                    current = dc.getTextWidthInPixels(word, font) <= maxWidth
+                        ? word
+                        : truncateText(dc, word, font, maxWidth);
+                }
+                word = "";
+            }
+
+            if ((ch.equals("\n") || atEnd) && current.length() > 0) {
+                lines.add(current);
+                current = "";
+            }
+
+            if (maxLines > 0 && lines.size() >= maxLines) {
+                return lines.slice(0, maxLines) as Array<String>;
+            }
+        }
+        return lines;
     }
 }

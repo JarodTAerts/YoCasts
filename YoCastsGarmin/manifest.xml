@@ -10,8 +10,6 @@
 
         <iq:permissions>
             <iq:uses-permission id="Communications"/>
-            <iq:uses-permission id="Background"/>
-            <iq:uses-permission id="PersistedContent"/>
         </iq:permissions>
 
         <iq:products>

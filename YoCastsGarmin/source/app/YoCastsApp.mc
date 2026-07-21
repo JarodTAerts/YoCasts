@@ -12,34 +12,27 @@ class YoCastsApp extends Application.AudioContentProviderApp {
 
     private var _service as IPodcastService?;
     private var _contentDelegate as YoCastsContentDelegate?;
-    private var _syncEngine as SyncEngine?;
+    private var _fetchStarted as Boolean = false;
 
     function initialize() {
         AudioContentProviderApp.initialize();
     }
 
     function onStart(state) {
+        AutoSyncManager.applyDisabledSetting();
+        DownloadQueue.recoverInterruptedDownloads();
+        PlaybackState.restore();
         _service = createService();
-        var svc = _service as IPodcastService;
-        svc.fetchAll();
-
-        // Create sync engine and attempt sync on launch
-        _syncEngine = new SyncEngine(svc);
-        (_syncEngine as SyncEngine).startSync();
     }
 
     //! Primary entry point for audio content providers.
     //! Called when the user selects YoCasts from Music Providers.
     //! Three-state gate: unauthenticated → login, otherwise → home menu.
-    //! Also triggers sync on each foreground resume.
     function getPlaybackConfigurationView() {
-        // Trigger sync on foreground resume (no-op if already syncing/offline/empty)
-        if (_syncEngine != null) {
-            (_syncEngine as SyncEngine).startSync();
-        }
-
         if (hasCredentials() || shouldUseMockData()) {
+            validateDownloadedMedia();
             var service = getService();
+            ensureMetadataFetch(service);
             var view = new HomeMenuView(service);
             return [view, new HomeMenuDelegate(view, service)];
         } else {
@@ -47,10 +40,10 @@ class YoCastsApp extends Application.AudioContentProviderApp {
         }
     }
 
-    //! Sync entry point — returns the same HomeMenuView.
-    //! On some devices this is called instead of playback config.
+    //! Native sync configuration entry point.
     function getSyncConfigurationView() {
-        return getPlaybackConfigurationView();
+        var view = new SyncConfigurationView();
+        return [view, new SyncConfigurationDelegate(view)];
     }
 
     //! Returns the content delegate that the native player uses for playback.
@@ -72,16 +65,75 @@ class YoCastsApp extends Application.AudioContentProviderApp {
         return new Media.ProviderIconInfo(Rez.Drawables.LauncherIcon, 0x55AAFF);
     }
 
+    //! Select downloaded content and transfer control to Garmin's native player.
+    function requestPlayback(uuid as String) as Void {
+        if (!StorageManager.isEpisodeDownloaded(uuid)) {
+            System.println("YoCasts: cannot play undownloaded episode " + uuid);
+            return;
+        }
+
+        StorageManager.setSelectedEpisode(uuid);
+        if (_contentDelegate == null) {
+            _contentDelegate = new YoCastsContentDelegate();
+        } else {
+            (_contentDelegate as YoCastsContentDelegate).resetContentIterator();
+        }
+
+        System.println("YoCasts: starting native playback for " + uuid);
+        Media.startPlayback(null);
+    }
+
+    //! Ask the system to enter its managed Wi-Fi media sync flow.
+    function requestMediaSync() as Void {
+        if (DownloadQueue.getNextPending() == null &&
+            ChangeLog.getEntryCount() == 0 &&
+            !AutoSyncManager.isRefreshDue() &&
+            !AutoSyncManager.hasMediaSyncRequest()) {
+            return;
+        }
+        if (AutoSyncManager.hasMediaSyncRequest()) {
+            AutoSyncManager.clearMediaSyncRequest();
+            AutoSyncManager.forceRefresh();
+        }
+        System.println("YoCasts: requesting native media sync");
+        Media.startSync();
+    }
+
+    //! Delete both the encrypted media item and its application metadata.
+    function deleteDownloadedEpisode(uuid as String) as Void {
+        var refId = StorageManager.getEpisodeRefId(uuid);
+        if (refId != null) {
+            try {
+                Media.deleteCachedItem(new Media.ContentRef(
+                    refId,
+                    Media.CONTENT_TYPE_AUDIO
+                ));
+            } catch (e) {
+                System.println("YoCasts: media cache delete failed for " + uuid);
+            }
+        }
+        StorageManager.removeDownload(uuid);
+        DownloadQueue.removeFromQueue(uuid);
+        if (_contentDelegate != null) {
+            (_contentDelegate as YoCastsContentDelegate).resetContentIterator();
+        }
+    }
+
+    function isNativeMediaAvailable() as Boolean {
+        return true;
+    }
+
     function onStop(state) {
     }
 
     //! Called when settings are changed via Garmin Connect Mobile or simulator.
     function onSettingsChanged() as Void {
         System.println("YoCasts: settings changed, recreating service");
+        AutoSyncManager.onSettingsChanged();
         _service = createService();
+        _fetchStarted = false;
         var svc = _service as IPodcastService;
-        svc.fetchAll();
-        _syncEngine = new SyncEngine(svc);
+        ensureMetadataFetch(svc);
         WatchUi.requestUpdate();
     }
 
@@ -131,6 +183,35 @@ class YoCastsApp extends Application.AudioContentProviderApp {
             _service = createService();
         }
         return _service as IPodcastService;
+    }
+
+    private function ensureMetadataFetch(service as IPodcastService) as Void {
+        if (_fetchStarted || !ConnectivityManager.isConnected()) {
+            return;
+        }
+        _fetchStarted = true;
+        service.fetchAll();
+    }
+
+    private function validateDownloadedMedia() as Void {
+        var downloads = StorageManager.getDownloadedEpisodes();
+        for (var i = 0; i < downloads.size(); i++) {
+            var entry = downloads[i] as Dictionary;
+            var uuid = entry.get("episodeUuid");
+            var refId = entry.get("refId");
+            if (uuid == null || refId == null) {
+                continue;
+            }
+            try {
+                Media.getCachedContentObj(new Media.ContentRef(
+                    refId,
+                    Media.CONTENT_TYPE_AUDIO
+                ));
+            } catch (e) {
+                System.println("YoCasts: stale media reference " + uuid);
+                DownloadQueue.markMediaMissing(uuid as String);
+            }
+        }
     }
 
     //! Build the home menu view + delegate pair

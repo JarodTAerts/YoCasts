@@ -9,15 +9,17 @@ import Toybox.System;
 class YoCastsApp extends Application.AppBase {
 
     private var _service as IPodcastService?;
+    private var _fetchStarted as Boolean = false;
 
     function initialize() {
         AppBase.initialize();
     }
 
     function onStart(state) {
+        AutoSyncManager.applyDisabledSetting();
+        DownloadQueue.recoverInterruptedDownloads();
+        PlaybackState.restore();
         _service = createService();
-        var svc = _service as IPodcastService;
-        svc.fetchAll();
     }
 
     //! Standard watch-app entry point.
@@ -25,6 +27,7 @@ class YoCastsApp extends Application.AppBase {
     function getInitialView() {
         if (hasCredentials() || shouldUseMockData()) {
             var service = getService();
+            ensureMetadataFetch(service);
             var view = new HomeMenuView(service);
             return [view, new HomeMenuDelegate(view, service)];
         } else {
@@ -38,10 +41,31 @@ class YoCastsApp extends Application.AppBase {
     //! Called when settings are changed via Garmin Connect Mobile or simulator.
     function onSettingsChanged() as Void {
         System.println("YoCasts: settings changed, recreating service");
+        AutoSyncManager.onSettingsChanged();
         _service = createService();
+        _fetchStarted = false;
         var svc = _service as IPodcastService;
-        svc.fetchAll();
+        ensureMetadataFetch(svc);
         WatchUi.requestUpdate();
+    }
+
+    //! Simulator cannot run Garmin's native media pipeline.
+    function requestPlayback(uuid as String) as Void {
+        StorageManager.setSelectedEpisode(uuid);
+        System.println("YoCasts: native playback requires physical hardware");
+    }
+
+    function requestMediaSync() as Void {
+        System.println("YoCasts: native media sync requires physical hardware");
+    }
+
+    function deleteDownloadedEpisode(uuid as String) as Void {
+        StorageManager.removeDownload(uuid);
+        DownloadQueue.removeFromQueue(uuid);
+    }
+
+    function isNativeMediaAvailable() as Boolean {
+        return false;
     }
 
     //! Check if PocketCasts credentials are available (always true in sim with hardcoded fallback)
@@ -89,7 +113,7 @@ class YoCastsApp extends Application.AppBase {
 
         if (!useMock) {
             try {
-                System.println("YoCasts: creating real service with " + email);
+                System.println("YoCasts: creating real Pocket Casts service");
                 var realService = new PocketCastsPodcastService(email, password);
                 return new CachedPodcastService(realService);
             } catch (e) {
@@ -105,6 +129,14 @@ class YoCastsApp extends Application.AppBase {
             _service = createService();
         }
         return _service as IPodcastService;
+    }
+
+    private function ensureMetadataFetch(service as IPodcastService) as Void {
+        if (_fetchStarted || !ConnectivityManager.isConnected()) {
+            return;
+        }
+        _fetchStarted = true;
+        service.fetchAll();
     }
 
     //! Build the home menu view + delegate pair

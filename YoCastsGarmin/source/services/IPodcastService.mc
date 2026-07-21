@@ -19,6 +19,22 @@ class IPodcastService {
         return false;
     }
 
+    function isLoading() as Boolean {
+        return false;
+    }
+
+    function getLastError() as String {
+        return "";
+    }
+
+    function hasLoadedPodcasts() as Boolean {
+        return false;
+    }
+
+    function hasLoadedQueue() as Boolean {
+        return false;
+    }
+
     //! Whether episode data for a specific podcast is cached
     function hasEpisodesForPodcast(podcastUuid as String) as Boolean {
         return getEpisodesForPodcast(podcastUuid).size() > 0;
@@ -32,6 +48,18 @@ class IPodcastService {
     //! Trigger async fetch of episodes for a specific podcast.
     //! Results populate the cache returned by getEpisodesForPodcast().
     function requestEpisodesForPodcast(podcastUuid as String) as Void {
+    }
+
+    //! Fetch extended show notes for one episode on demand.
+    function requestEpisodeDetails(episodeUuid as String) as Void {
+    }
+
+    function getEpisodeDetails(episodeUuid as String) as Dictionary? {
+        return null;
+    }
+
+    //! Push cached offline changes when foreground connectivity is available.
+    function syncPendingChanges() as Void {
     }
 
     //! Get cached list of subscribed podcasts.
@@ -57,5 +85,11 @@ class IPodcastService {
     //! Returns: Dictionary with episode data, or null if nothing playing
     function getNowPlaying() as Dictionary? {
         return null;
+    }
+
+    //! Get the current access token for authenticated API calls.
+    //! Returns empty string if not authenticated.
+    function getAccessToken() as String {
+        return "";
     }
 }

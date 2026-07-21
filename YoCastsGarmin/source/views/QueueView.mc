@@ -11,9 +11,11 @@ class QueueView extends WatchUi.View {
     private var _episodes as Array<Dictionary> = [] as Array<Dictionary>;
     private var _podcasts as Array<Dictionary> = [] as Array<Dictionary>;
     private var _scrollOffset as Number = 0;
+    private var _selectedIndex as Number = 0;
 
     private const TITLE_H = 60;
-    private const ITEM_H = 80;
+    private const ITEM_H = 88;
+    private const BOTTOM_SAFE_INSET = 40;
 
     function initialize(service as IPodcastService) {
         View.initialize();
@@ -33,12 +35,17 @@ class QueueView extends WatchUi.View {
         for (var i = 0; i < limit; i++) {
             _episodes.add(queue[i] as Dictionary);
         }
+        if (_selectedIndex >= _episodes.size()) {
+            _selectedIndex = _episodes.size() > 0 ? _episodes.size() - 1 : 0;
+        }
+        clampScroll();
         System.println("YoCasts: loadQueue() — loaded " + _episodes.size() + " episodes");
     }
 
     function onUpdate(dc as Graphics.Dc) as Void {
         var w = dc.getWidth();
         var h = dc.getHeight();
+        loadQueue();
 
         // Black background
         dc.setColor(Graphics.COLOR_BLACK, Graphics.COLOR_BLACK);
@@ -46,7 +53,10 @@ class QueueView extends WatchUi.View {
 
         // Empty state
         if (_episodes.size() == 0) {
-            var label = _service.isDataReady() ? "Queue is empty" : "Loading...";
+            var error = _service.getLastError();
+            var label = error.length() > 0
+                ? error
+                : (_service.isDataReady() ? "Queue is empty" : "Loading...");
             dc.setColor(Graphics.COLOR_WHITE, Graphics.COLOR_TRANSPARENT);
             dc.drawText(w / 2, h / 2 - dc.getFontHeight(Graphics.FONT_SMALL) / 2,
                         Graphics.FONT_SMALL, label, Graphics.TEXT_JUSTIFY_CENTER);
@@ -68,14 +78,17 @@ class QueueView extends WatchUi.View {
         for (var i = 0; i < _episodes.size(); i++) {
             var itemY = itemsStartY + i * ITEM_H;
             if (itemY + ITEM_H < 0 || itemY >= h) { continue; }
-            drawEpisodeItem(dc, _episodes[i], itemY, ITEM_H, w);
+            drawEpisodeItem(dc, _episodes[i], itemY, ITEM_H, w,
+                            i == _selectedIndex);
         }
         dc.clearClip();
+        drawScrollIndicators(dc);
     }
 
     //! Draw a single episode item pill
     private function drawEpisodeItem(dc as Graphics.Dc, ep as Dictionary,
-                                      y as Number, h as Number, w as Number) as Void {
+                                      y as Number, h as Number, w as Number,
+                                      selected as Boolean) as Void {
         var podUuid = ep[DataKeys.E_PODCAST_UUID] as String;
         var colors = DataFormat.lookupPodcastColors(_podcasts, podUuid);
         var brandColor = colors[0] as Number;
@@ -86,14 +99,30 @@ class QueueView extends WatchUi.View {
         var duration = ep[DataKeys.E_DURATION] as Number;
         var playedUpTo = ep[DataKeys.E_PLAYED_UP_TO] as Number;
 
-        // Build subtitle
-        var sub = podTitle;
+        // Keep podcast context left-aligned and the actionable state visible
+        // on the right instead of building one long truncated sentence.
+        var meta = "";
         if (playedUpTo > 0 && playedUpTo < duration) {
-            sub = sub + " | " + DataFormat.formatDuration(playedUpTo) + "/" + DataFormat.formatDuration(duration);
+            meta = DataFormat.formatDuration(playedUpTo) + "/" +
+                DataFormat.formatDuration(duration);
         } else if (playedUpTo >= duration && duration > 0) {
-            sub = sub + " | Played";
+            meta = "Played";
         } else {
-            sub = sub + " | " + DataFormat.formatDuration(duration);
+            meta = DataFormat.formatDuration(duration);
+        }
+        var downloadStatus = DownloadQueue.getStatus(
+            ep[DataKeys.E_UUID] as String
+        );
+        if (downloadStatus == DownloadQueue.STATUS_DOWNLOADED) {
+            meta = "Ready";
+        } else if (downloadStatus == DownloadQueue.STATUS_PENDING) {
+            meta = "Queued";
+        } else if (downloadStatus == DownloadQueue.STATUS_DOWNLOADING) {
+            meta = DownloadQueue.getProgress(
+                ep[DataKeys.E_UUID] as String
+            ) + "%";
+        } else if (downloadStatus == DownloadQueue.STATUS_FAILED) {
+            meta = "Retry";
         }
 
         // Rounded pill layout
@@ -108,6 +137,15 @@ class QueueView extends WatchUi.View {
         var bgColor = DataFormat.dimColor(boosted, 0.30);
         dc.setColor(bgColor, Graphics.COLOR_TRANSPARENT);
         dc.fillRoundedRectangle(marginX, y + marginY, itemW, itemH, radius);
+        if (selected) {
+            dc.setColor(DataFormat.brightenColor(brandColor, 180),
+                        Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawRoundedRectangle(
+                marginX, y + marginY, itemW, itemH, radius
+            );
+            dc.setPenWidth(1);
+        }
 
         // Accent bar inside the rounded rect (left side)
         var barColor = DataFormat.brightenColor(brandColor, 160);
@@ -116,7 +154,8 @@ class QueueView extends WatchUi.View {
 
         // Title and subtitle — positioned within the rounded rect
         var textX = marginX + 14;
-        var maxTextW = (marginX + itemW) - textX - 12;
+        var rightInset = 24;
+        var maxTextW = (marginX + itemW) - textX - rightInset;
         var titleH = dc.getFontHeight(Graphics.FONT_TINY);
         var subH = dc.getFontHeight(Graphics.FONT_XTINY);
         var startY = y + (h - titleH - 2 - subH) / 2;
@@ -127,12 +166,39 @@ class QueueView extends WatchUi.View {
                     DataFormat.truncateText(dc, title, Graphics.FONT_TINY, maxTextW),
                     Graphics.TEXT_JUSTIFY_LEFT);
 
-        var subColor = DataFormat.dimColor(tintColor, 0.6);
-        subColor = DataFormat.ensureContrast(subColor, bgColor);
+        var metaWidth = dc.getTextWidthInPixels(
+            meta,
+            Graphics.FONT_XTINY
+        );
+        var podcastWidth = maxTextW - metaWidth - 14;
+        if (podcastWidth < 60) { podcastWidth = 60; }
+        var subColor = DataFormat.ensureContrast(
+            DataFormat.dimColor(tintColor, 0.6),
+            bgColor
+        );
         dc.setColor(subColor, Graphics.COLOR_TRANSPARENT);
         dc.drawText(textX, startY + titleH + 2, Graphics.FONT_XTINY,
-                    DataFormat.truncateText(dc, sub, Graphics.FONT_XTINY, maxTextW),
+                    DataFormat.truncateText(
+                        dc,
+                        podTitle,
+                        Graphics.FONT_XTINY,
+                        podcastWidth
+                    ),
                     Graphics.TEXT_JUSTIFY_LEFT);
+        dc.setColor(
+            DataFormat.ensureContrast(
+                DataFormat.brightenColor(brandColor, 190),
+                bgColor
+            ),
+            Graphics.COLOR_TRANSPARENT
+        );
+        dc.drawText(
+            marginX + itemW - rightInset,
+            startY + titleH + 2,
+            Graphics.FONT_XTINY,
+            meta,
+            Graphics.TEXT_JUSTIFY_RIGHT
+        );
     }
 
     // --- Scroll management (called by delegate) ---
@@ -144,14 +210,60 @@ class QueueView extends WatchUi.View {
         WatchUi.requestUpdate();
     }
 
+    function moveSelection(delta as Number) as Void {
+        if (_episodes.size() == 0) { return; }
+        _selectedIndex += delta;
+        if (_selectedIndex < 0) {
+            _selectedIndex = _episodes.size() - 1;
+        } else if (_selectedIndex >= _episodes.size()) {
+            _selectedIndex = 0;
+        }
+
+        var screenH = System.getDeviceSettings().screenHeight;
+        var safeBottom = screenH - BOTTOM_SAFE_INSET;
+        var itemTop = TITLE_H + _selectedIndex * ITEM_H;
+        var itemBottom = itemTop + ITEM_H;
+        if (itemTop < _scrollOffset) {
+            _scrollOffset = itemTop;
+        } else if (itemBottom > _scrollOffset + safeBottom) {
+            _scrollOffset = itemBottom - safeBottom;
+        }
+        clampScroll();
+        WatchUi.requestUpdate();
+    }
+
+    function setSelectedIndex(index as Number) as Void {
+        if (index >= 0 && index < _episodes.size()) {
+            _selectedIndex = index;
+        }
+    }
+
+    function getSelectedIndex() as Number {
+        return _selectedIndex;
+    }
+
     //! Clamp scroll offset to valid range
     private function clampScroll() as Void {
         var screenH = System.getDeviceSettings().screenHeight;
         var contentH = TITLE_H + _episodes.size() * ITEM_H;
-        var maxScroll = contentH - screenH;
+        var maxScroll = contentH - screenH + BOTTOM_SAFE_INSET;
         if (maxScroll < 0) { maxScroll = 0; }
         if (_scrollOffset > maxScroll) { _scrollOffset = maxScroll; }
         if (_scrollOffset < 0) { _scrollOffset = 0; }
+    }
+
+    private function drawScrollIndicators(dc as Graphics.Dc) as Void {
+        var screenH = System.getDeviceSettings().screenHeight;
+        var maxScroll = TITLE_H + _episodes.size() * ITEM_H - screenH +
+            BOTTOM_SAFE_INSET;
+        if (maxScroll < 0) { maxScroll = 0; }
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        if (_scrollOffset > 0) {
+            dc.fillPolygon([[265, 25], [277, 25], [271, 16]]);
+        }
+        if (_scrollOffset < maxScroll) {
+            dc.fillPolygon([[265, 363], [277, 363], [271, 372]]);
+        }
     }
 
     //! Hit-test: which episode index is at screen Y? Returns -1 if none.
@@ -191,12 +303,12 @@ class QueueDelegate extends WatchUi.BehaviorDelegate {
     }
 
     function onNextPage() as Boolean {
-        _view.scroll(50);
+        _view.moveSelection(1);
         return true;
     }
 
     function onPreviousPage() as Boolean {
-        _view.scroll(-50);
+        _view.moveSelection(-1);
         return true;
     }
 
@@ -212,17 +324,46 @@ class QueueDelegate extends WatchUi.BehaviorDelegate {
         var idx = _view.itemIndexAtY(y);
         System.println("YoCasts: Queue tap hit-test → idx=" + idx);
         if (idx >= 0) {
-            var ep = _view.getEpisode(idx);
-            if (ep != null) {
-                var detailView = new EpisodeDetailView(ep);
-                var detailDelegate = new EpisodeDetailDelegate(ep);
-                detailDelegate.setView(detailView);
-                WatchUi.pushView(detailView, detailDelegate, WatchUi.SLIDE_UP);
-                return true;
-            }
+            _view.setSelectedIndex(idx);
+            return openEpisode(idx);
         }
 
         return false;
+    }
+
+    function onKey(evt as WatchUi.KeyEvent) as Boolean {
+        var key = evt.getKey();
+        if (key == WatchUi.KEY_DOWN) {
+            _view.moveSelection(1);
+            return true;
+        }
+        if (key == WatchUi.KEY_UP) {
+            _view.moveSelection(-1);
+            return true;
+        }
+        if (key == WatchUi.KEY_ENTER || key == WatchUi.KEY_START) {
+            return openEpisode(_view.getSelectedIndex());
+        }
+        if (key == WatchUi.KEY_ESC) {
+            return onBack();
+        }
+        return false;
+    }
+
+    private function openEpisode(index as Number) as Boolean {
+        var ep = _view.getEpisode(index);
+        if (ep == null) { return false; }
+        var detailView = new EpisodeDetailView(
+            ep as Dictionary,
+            _service
+        );
+        var detailDelegate = new EpisodeDetailDelegate(
+            ep as Dictionary,
+            _service
+        );
+        detailDelegate.setView(detailView);
+        WatchUi.pushView(detailView, detailDelegate, WatchUi.SLIDE_UP);
+        return true;
     }
 
     function onBack() as Boolean {

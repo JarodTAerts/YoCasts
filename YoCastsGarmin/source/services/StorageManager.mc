@@ -14,21 +14,12 @@ module StorageManager {
 
     // ---- Storage keys ----
     const KEY_DOWNLOADS = "yc_downloads";
+    const KEY_SELECTED_EPISODE = "yc_selected_episode";
 
-    //! Get available storage space on the device in bytes.
-    //! Falls back to 0 if the API is unavailable (simulator).
+    //! Media capacity is only available through Toybox.Media in the device
+    //! build. Shared code must treat -1 as unknown rather than confusing RAM
+    //! with disk capacity.
     function getAvailableSpace() as Number {
-        try {
-            var stats = System.getSystemStats();
-            if (stats has :freeMemory) {
-                return stats.freeMemory;
-            }
-        } catch (e) {
-            // API not available in this environment
-        }
-        // System.getSystemStats doesn't expose disk storage directly.
-        // On real hardware, Media.getStorageInfo() would be used,
-        // but we avoid Media imports here. Return -1 to indicate unknown.
         return -1;
     }
 
@@ -59,14 +50,16 @@ module StorageManager {
 
     //! Get the ContentRef ID for a downloaded episode (for Media module playback).
     //! Returns null if the episode is not downloaded.
-    function getEpisodeRefId(uuid as String) as String? {
+    function getEpisodeRefId(
+        uuid as String
+    ) as Application.Storage.ValueType? {
         var downloads = _loadDownloads();
         var entry = downloads.get(uuid);
         if (entry != null && entry instanceof Dictionary) {
             var d = entry as Dictionary;
             var refId = d.get("refId");
             if (refId != null) {
-                return refId as String;
+                return refId as Application.Storage.ValueType;
             }
         }
         return null;
@@ -86,6 +79,15 @@ module StorageManager {
         return null;
     }
 
+    //! Return the complete metadata entry for one downloaded episode.
+    function getDownload(uuid as String) as Dictionary? {
+        var entry = _loadDownloads().get(uuid);
+        if (entry != null && entry instanceof Dictionary) {
+            return entry as Dictionary;
+        }
+        return null;
+    }
+
     //! Record a completed download. Called after an audio file is
     //! successfully saved to the Media cache (device) or after a
     //! simulated download (simulator testing).
@@ -95,12 +97,13 @@ module StorageManager {
     //! @param fileSize Size of the downloaded file in bytes (0 if unknown)
     //! @param contentType MIME type of the audio file (e.g., "audio/mpeg")
     function markDownloaded(uuid as String, podcastUuid as String,
-                            refId as String, fileSize as Number,
+                            refId as Application.Storage.ValueType,
+                            fileSize as Number,
                             contentType as String) as Void {
         var downloads = _loadDownloads();
         downloads.put(uuid, {
             "podcastUuid" => podcastUuid as Application.Storage.ValueType,
-            "refId" => refId as Application.Storage.ValueType,
+            "refId" => refId,
             "downloadedAt" => Time.now().value() as Application.Storage.ValueType,
             "fileSize" => fileSize as Application.Storage.ValueType,
             "contentType" => contentType as Application.Storage.ValueType
@@ -118,6 +121,29 @@ module StorageManager {
             _saveDownloads(downloads);
             System.println("YoCasts Storage: removed download record " + uuid);
         }
+        var selected = getSelectedEpisode();
+        if (selected != null && (selected as String).equals(uuid)) {
+            Application.Storage.deleteValue(KEY_SELECTED_EPISODE);
+        }
+        if (PlaybackState.currentUuid.equals(uuid)) {
+            PlaybackState.clear();
+        }
+    }
+
+    //! Persist the episode that playback configuration selected.
+    function setSelectedEpisode(uuid as String) as Void {
+        Application.Storage.setValue(
+            KEY_SELECTED_EPISODE,
+            uuid as Application.Storage.ValueType
+        );
+    }
+
+    function getSelectedEpisode() as String? {
+        var value = Application.Storage.getValue(KEY_SELECTED_EPISODE);
+        if (value != null && value instanceof String) {
+            return value as String;
+        }
+        return null;
     }
 
     //! Get the number of downloaded episodes.
@@ -146,6 +172,7 @@ module StorageManager {
     //! Clear all download records. Use with caution — only for full reset.
     function clearDownloads() as Void {
         Application.Storage.deleteValue(KEY_DOWNLOADS);
+        Application.Storage.deleteValue(KEY_SELECTED_EPISODE);
     }
 
     // ================================================================

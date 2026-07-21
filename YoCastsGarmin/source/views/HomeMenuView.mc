@@ -1,4 +1,5 @@
 import Toybox.Lang;
+import Toybox.Application;
 import Toybox.WatchUi;
 import Toybox.Graphics;
 import Toybox.System;
@@ -22,10 +23,12 @@ class HomeMenuView extends WatchUi.View {
     // Menu items
     private var _items as Array<Dictionary>;
     private var _scrollOffset as Number = 0;  // pixels scrolled up
+    private var _selectedIndex as Number = 0;
+    private var _foregroundSyncTicks as Number = 0;
 
     // Layout constants
-    private const TITLE_H = 60;
-    private const ITEM_H = 80;
+    private const TITLE_H = 52;
+    private const ITEM_H = 72;
     private const DOCK_H = 110;
     private const ITEM_COUNT = 4;
 
@@ -65,9 +68,11 @@ class HomeMenuView extends WatchUi.View {
         for (var i = 0; i < _items.size(); i++) {
             var itemY = itemsStartY + i * ITEM_H;
             if (itemY + ITEM_H < 0 || itemY >= dockY) { continue; }
-            drawMenuItem(dc, _items[i], itemY, ITEM_H, w);
+            drawMenuItem(dc, _items[i], itemY, ITEM_H, w,
+                         i == _selectedIndex);
         }
         dc.clearClip();
+        drawScrollIndicators(dc, dockY, w);
 
         // --- Now Playing dock (fixed at bottom, drawn last) ---
         drawNowPlayingDock(dc, dockY, DOCK_H, w);
@@ -75,15 +80,25 @@ class HomeMenuView extends WatchUi.View {
 
     //! Draw a single menu item pill
     private function drawMenuItem(dc as Graphics.Dc, item as Dictionary,
-                                   y as Number, h as Number, w as Number) as Void {
+                                   y as Number, h as Number, w as Number,
+                                   selected as Boolean) as Void {
         var marginX = 20;
         var marginY = 5;
         var itemW = w - 2 * marginX;
         var itemH = h - 2 * marginY;
         var radius = 16;
 
-        dc.setColor(0x1A1A2E, Graphics.COLOR_TRANSPARENT);
+        dc.setColor(selected ? 0x252545 : 0x1A1A2E,
+                    Graphics.COLOR_TRANSPARENT);
         dc.fillRoundedRectangle(marginX, y + marginY, itemW, itemH, radius);
+        if (selected) {
+            dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+            dc.setPenWidth(2);
+            dc.drawRoundedRectangle(
+                marginX, y + marginY, itemW, itemH, radius
+            );
+            dc.setPenWidth(1);
+        }
 
         // Icon
         var iconX = marginX + 16;
@@ -194,22 +209,22 @@ class HomeMenuView extends WatchUi.View {
             }
         }
 
-        // Arc play/pause button at the very bottom (Garmin-style outline only)
+        // Arc handoff button at the very bottom (Garmin-style outline only).
         // drawArc clockwise from 315° (bottom-right) to 225° (bottom-left) = bottom 90°
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
         dc.setPenWidth(2);
         dc.drawArc(cx, cx, r - 2, Graphics.ARC_CLOCKWISE, 315, 225);
         dc.setPenWidth(1);
 
-        // Play/pause icon centered below the arc line
+        // Chevron communicates "open native player"; this control does not
+        // directly pause Garmin-owned playback.
         var iconY = screenH - 20;
         dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
-        if (PlaybackState.isPlaying) {
-            dc.fillRectangle(cx - 8, iconY - 8, 5, 16);
-            dc.fillRectangle(cx + 3, iconY - 8, 5, 16);
-        } else {
-            dc.fillPolygon([[cx - 7, iconY - 9], [cx - 7, iconY + 9], [cx + 9, iconY]]);
-        }
+        dc.fillPolygon([
+            [cx - 10, iconY + 5],
+            [cx, iconY - 6],
+            [cx + 10, iconY + 5]
+        ]);
     }
 
     //! Draw a Garmin-style arc outline at the bottom of the round screen (idle state)
@@ -291,20 +306,68 @@ class HomeMenuView extends WatchUi.View {
         WatchUi.requestUpdate();
     }
 
+    function moveSelection(delta as Number) as Void {
+        _selectedIndex += delta;
+        if (_selectedIndex < 0) {
+            _selectedIndex = _items.size() - 1;
+        } else if (_selectedIndex >= _items.size()) {
+            _selectedIndex = 0;
+        }
+
+        var dockY = System.getDeviceSettings().screenHeight - DOCK_H;
+        var itemTop = TITLE_H + _selectedIndex * ITEM_H;
+        var itemBottom = itemTop + ITEM_H;
+        if (itemTop < _scrollOffset) {
+            _scrollOffset = itemTop;
+        } else if (itemBottom > _scrollOffset + dockY) {
+            _scrollOffset = itemBottom - dockY;
+        }
+        clampScroll();
+        WatchUi.requestUpdate();
+    }
+
+    function setSelectedIndex(index as Number) as Void {
+        if (index >= 0 && index < _items.size()) {
+            _selectedIndex = index;
+            WatchUi.requestUpdate();
+        }
+    }
+
+    function getSelectedItemId() as Symbol {
+        return getItemId(_selectedIndex);
+    }
+
     //! Clamp scroll offset to valid range
     private function clampScroll() as Void {
-        var screenH = System.getDeviceSettings().screenHeight;
-        var dockY = screenH - DOCK_H;
-        // Total content height = title + all items
-        var contentH = TITLE_H + _items.size() * ITEM_H;
-        // Max scroll: last item's bottom aligns with dock top
-        var maxScroll = contentH - dockY;
-        if (maxScroll < 0) { maxScroll = 0; }
+        var maxScroll = getMaxScroll();
         if (_scrollOffset > maxScroll) { _scrollOffset = maxScroll; }
         if (_scrollOffset < 0) { _scrollOffset = 0; }
     }
 
+    private function getMaxScroll() as Number {
+        var dockY = System.getDeviceSettings().screenHeight - DOCK_H;
+        var maxScroll = TITLE_H + _items.size() * ITEM_H - dockY;
+        return maxScroll > 0 ? maxScroll : 0;
+    }
+
+    private function drawScrollIndicators(dc as Graphics.Dc, dockY as Number,
+                                          width as Number) as Void {
+        dc.setColor(0x55AAFF, Graphics.COLOR_TRANSPARENT);
+        var x = width - 22;
+        if (_scrollOffset > 0) {
+            dc.fillPolygon([[x - 6, 16], [x + 6, 16], [x, 9]]);
+        }
+        if (_scrollOffset < getMaxScroll()) {
+            dc.fillPolygon([
+                [x - 6, dockY - 15],
+                [x + 6, dockY - 15],
+                [x, dockY - 8]
+            ]);
+        }
+    }
+
     function onShow() as Void {
+        PlaybackState.restore();
         if (_refreshTimer == null) {
             _refreshTimer = new Timer.Timer();
         }
@@ -318,7 +381,23 @@ class HomeMenuView extends WatchUi.View {
     }
 
     function onRefreshTick() as Void {
-        WatchUi.requestUpdate();
+        PlaybackState.restore();
+        _foregroundSyncTicks++;
+        if (_foregroundSyncTicks >= 30) {
+            _foregroundSyncTicks = 0;
+            if (ConnectivityManager.isConnected() &&
+                ChangeLog.getEntryCount() > 0) {
+                _service.syncPendingChanges();
+            }
+        }
+        var app = Application.getApp() as YoCastsApp;
+        if (app.isNativeMediaAvailable() &&
+            AutoSyncManager.hasMediaSyncRequest()) {
+            app.requestMediaSync();
+        }
+        if (PlaybackState.hasActivePlayback()) {
+            WatchUi.requestUpdate();
+        }
     }
 
     function getService() as IPodcastService {
@@ -365,12 +444,12 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
 
     //! Up/down scrolling via buttons or crown — scroll by one item height
     function onNextPage() as Boolean {
-        _view.scroll(50);
+        _view.moveSelection(1);
         return true;
     }
 
     function onPreviousPage() as Boolean {
-        _view.scroll(-50);
+        _view.moveSelection(-1);
         return true;
     }
 
@@ -394,10 +473,12 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
         var arcZoneY = screenH - 40;  // bottom 40px is the play/pause arc button
         if (y >= dockY) {
             if (y >= arcZoneY) {
-                // Arc button zone — toggle play/pause
-                System.println("YoCasts: HomeMenu dock arc tapped — toggling play/pause");
-                PlaybackState.isPlaying = !PlaybackState.isPlaying;
-                WatchUi.requestUpdate();
+                System.println("YoCasts: HomeMenu dock arc tapped");
+                if (PlaybackState.currentUuid.length() > 0) {
+                    (Application.getApp() as YoCastsApp).requestPlayback(
+                        PlaybackState.currentUuid
+                    );
+                }
             } else {
                 // Info zone — open NowPlaying screen
                 System.println("YoCasts: HomeMenu dock info tapped — opening NowPlaying");
@@ -410,12 +491,33 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
         var idx = _view.itemIndexAtY(y);
         System.println("YoCasts: HomeMenu tap hit-test → idx=" + idx);
         if (idx >= 0) {
+            _view.setSelectedIndex(idx);
             var id = _view.getItemId(idx);
             System.println("YoCasts: HomeMenu tap → navigating to " + id);
             navigateTo(id);
             return true;
         }
 
+        return false;
+    }
+
+    function onKey(evt as WatchUi.KeyEvent) as Boolean {
+        var key = evt.getKey();
+        if (key == WatchUi.KEY_DOWN) {
+            _view.moveSelection(1);
+            return true;
+        }
+        if (key == WatchUi.KEY_UP) {
+            _view.moveSelection(-1);
+            return true;
+        }
+        if (key == WatchUi.KEY_ENTER || key == WatchUi.KEY_START) {
+            navigateTo(_view.getSelectedItemId());
+            return true;
+        }
+        if (key == WatchUi.KEY_ESC) {
+            return onBack();
+        }
         return false;
     }
 
@@ -439,19 +541,32 @@ class HomeMenuDelegate extends WatchUi.BehaviorDelegate {
             WatchUi.pushView(dlView, new DownloadsDelegate(dlView), WatchUi.SLIDE_UP);
         } else if (id == :settings) {
             System.println("YoCasts: HomeMenu → Settings");
-            var settingsView = new SettingsView();
-            WatchUi.pushView(settingsView, new SettingsDelegate(settingsView), WatchUi.SLIDE_UP);
+            var settingsView = new SyncConfigurationView();
+            WatchUi.pushView(
+                settingsView,
+                new SyncConfigurationDelegate(settingsView),
+                WatchUi.SLIDE_UP
+            );
         }
     }
 
     private function navigateToNowPlaying() as Void {
         if (!PlaybackState.hasActivePlayback()) { return; }
-        var ep = _service.getNowPlaying();
-        if (ep != null) {
-            var npView = new NowPlayingView(ep);
-            var npDelegate = new NowPlayingDelegate(ep);
-            npDelegate.setView(npView);
-            WatchUi.pushView(npView, npDelegate, WatchUi.SLIDE_UP);
+        var downloads = DownloadQueue.getDownloads();
+        for (var i = 0; i < downloads.size(); i++) {
+            var item = downloads[i] as Dictionary;
+            var uuid = item.get(DownloadQueue.DL_UUID);
+            if (uuid != null &&
+                (uuid as String).equals(PlaybackState.currentUuid)) {
+                var ep = DownloadQueue.toEpisodeDict(item);
+                ep.put(DataKeys.E_PLAYED_UP_TO,
+                       PlaybackState.getEstimatedPosition());
+                var npView = new NowPlayingView(ep);
+                var npDelegate = new NowPlayingDelegate(ep);
+                npDelegate.setView(npView);
+                WatchUi.pushView(npView, npDelegate, WatchUi.SLIDE_UP);
+                return;
+            }
         }
     }
 }

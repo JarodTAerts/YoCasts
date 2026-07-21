@@ -1,10 +1,13 @@
-# YoCasts — Garmin Connect IQ App
+# YoCasts - Garmin Connect IQ App
 
-YoCasts is a Garmin watch client for [Pocket Casts](https://pocketcasts.com/). It lets you browse your subscribed podcasts, manage your Up Next queue, and view episode progress — all from your wrist.
+YoCasts is a Pocket Casts client and native audio provider for the Garmin Venu
+4. It browses subscriptions and Up Next, downloads episodes into Garmin's
+managed media cache, hands playback to Garmin's first-party player, and caches
+progress changes until they can be synchronized.
 
 **Primary target device:** Garmin Venu 4 41mm
-**Supported devices:** Venu 2/2S/2 Plus, Venu 3/3S, Forerunner 245/245M/265/265S/965, Fenix 7/7S/7X, Epix 2, vívoactive 4/4S
-**Min SDK:** Connect IQ 3.2.0
+**Supported device:** Garmin Venu 4 41mm (`venu441mm`)
+**Min SDK:** Connect IQ 4.2.0
 
 ---
 
@@ -19,15 +22,12 @@ YoCasts is a Garmin watch client for [Pocket Casts](https://pocketcasts.com/). I
 
 ### Generating a developer key
 
-If you don't already have one:
+Generate a key through Connect IQ SDK Manager or Garmin's Monkey C VS Code
+extension. The build script defaults to:
 
-```bash
-# Using the SDK manager CLI (connectiq SDK bin/ directory):
-openssl genrsa -out developer_key.pem 4096
-openssl req -new -x509 -key developer_key.pem -out developer_key.der -days 3650
+```text
+%APPDATA%\Garmin\ConnectIQ\developer_key.der
 ```
-
-Or generate one through the Connect IQ SDK Manager GUI → **Generate Developer Key**.
 
 > **Keep your key safe.** You'll need the same key to update apps you've already published or sideloaded.
 
@@ -73,14 +73,19 @@ All UI code (views, services, models) is shared. Only the app entry point and me
 From the `YoCastsGarmin/` directory:
 
 ```bash
-# Simulator build (for UI development & testing)
-monkeyc -d venu441mm -f monkey.simulator.jungle -o bin/YoCasts.prg -y /path/to/developer_key.der -l 3
+# Strict-build both variants
+.\build.ps1
 
-# Device build (for real hardware with audio support)
-monkeyc -d venu441mm -f monkey.jungle -o bin/YoCasts.prg -y /path/to/developer_key.der -l 3
+# Build only one variant
+.\build.ps1 -Target Simulator
+.\build.ps1 -Target Device
+
+# Override the default key when needed
+.\build.ps1 -DeveloperKey C:\path\to\developer_key.der
 ```
 
-> **Tip:** Use the simulator build for day-to-day UI work. Switch to the device build only when deploying to hardware or testing audio/media features.
+Outputs are `build\YoCastsSimulator.prg` and
+`build\YoCastsDevice.prg`.
 
 ### VS Code
 
@@ -108,19 +113,17 @@ Or use the VS Code command palette: **Monkey C: Start Simulator**.
 
 ### Loading the app
 
-```bash
-# Option 1: Use the deploy helper script (recommended)
-deploy-sim.bat                                    # defaults: venu441mm, developer_key
-deploy-sim.bat venu441mm /path/to/developer_key
+For normal UI/API testing:
 
-# Option 2: Manual build and deploy with settings
-monkeyc -d venu441mm -f monkey.simulator.jungle -o bin/YoCasts.prg -y /path/to/developer_key -l 3
-monkeydo bin/YoCasts.prg venu441mm /a bin/YoCasts-settings.json 0:/GARMIN/APPS/YoCasts-settings.json
+```powershell
+.\deploy-sim.ps1
 ```
 
-> **Settings in the simulator:** The `monkeydo` tool does **not** automatically deploy the `-settings.json` file that the compiler generates alongside the `.prg`. You must explicitly push it using the `/a` (additional files) flag as shown above. Without this, the simulator will show *"No settings file found for this app"* when you try to edit Application.Properties data via **File → Edit Persistent Storage → Edit Application.Properties Data**.
-
-Or in VS Code: press **F5** to build, launch the simulator, and load the app automatically (the Monkey C extension handles settings deployment for you).
+`monkeydo` can launch the app but cannot supply the descriptor used by App
+Settings Editor. To edit `Application.Properties`, open the `YoCastsGarmin`
+folder itself in VS Code and press **F5** with the included **Run YoCasts
+Simulator** configuration. Then use **File -> Edit Persistent Storage -> Edit
+Application.Properties Data** in the simulator.
 
 ---
 
@@ -128,19 +131,85 @@ Or in VS Code: press **F5** to build, launch the simulator, and load the app aut
 
 ### Sideloading via USB
 
-1. Connect your Garmin watch to your computer via USB.
-2. The watch mounts as a removable drive.
-3. Copy the built `.prg` file to:
+Sideloaded apps cannot edit their settings through Garmin Connect Mobile or
+Garmin Express. For a physical-device test, copy both the app and a matching
+simulator-generated `.SET` file.
+
+1. Open the `YoCastsGarmin` folder itself in VS Code with Garmin's **Monkey C**
+   extension installed.
+2. Press **F5** and use the included **Run YoCasts Simulator** launch
+   configuration. Do not use `deploy-sim.ps1` for this step: Garmin's
+   `monkeydo` CLI cannot provide the schema consumed by App Settings Editor.
+3. In the simulator, open **File → Edit Persistent Storage → Edit
+   Application.Properties Data** and set:
+   - `PocketCastsEmail`
+   - `PocketCastsPassword`
+   - `useMockData` = `false`
+   - `AutoDownloadCount` = `0`, `1`, `3`, or `5`
+4. Click **Save**, then close the simulator app so settings are flushed. The
+   generated file is normally:
    ```
-   <GARMIN_DRIVE>/GARMIN/APPS/YoCasts.prg
+   %TEMP%\com.garmin.connectiq\GARMIN\APPS\SETTINGS\YOCASTSGARMIN.SET
    ```
-4. Safely eject the drive and disconnect. The app will appear in your watch's app list.
+   If the filename differs, use the newest `.SET` file in that directory.
+5. Connect the watch by USB and wait for it to mount.
+6. Copy `build\YoCastsDevice.prg` to:
+   ```
+   <GARMIN_DRIVE>\GARMIN\APPS\YOCASTS.PRG
+   ```
+7. Copy the simulator settings file to the matching settings name:
+   ```
+   <GARMIN_DRIVE>\GARMIN\APPS\SETTINGS\YOCASTS.SET
+   ```
+   The `.PRG` and `.SET` base names must match exactly.
+8. Safely eject and disconnect. Open YoCasts from **Music Controls → Music
+   Providers**, not from the normal app list.
+
+The `.SET` file contains account credentials. Keep it out of source control.
+Do not copy `build\YoCastsDevice-settings.json`; that is SDK schema metadata,
+not the device settings file.
 
 ### Via Garmin Connect Mobile
 
 If the app is published to the Connect IQ Store, you can install it directly from the **Connect IQ** section of the Garmin Connect mobile app. *(Not yet published.)*
 
 ---
+
+## Runtime behavior
+
+### Native playback
+
+Episodes are not streamed by the Connect IQ app. Garmin downloads each file
+during a system media sync and returns an opaque `Media.ContentRef`. YoCasts
+stores that reference and supplies `Media.ActiveContent` to Garmin's player.
+Bluetooth routing, volume, pause, skip, and lock-screen controls therefore stay
+inside Garmin's native media UI.
+
+YoCasts receives discrete native song events rather than a per-second callback.
+The in-app progress display estimates time between events, then persists the
+next real callback. Position, completion, and queue mutations are retained in
+`Application.Storage` until Pocket Casts can be reached.
+
+### Automatic Up Next
+
+`AutoDownloadCount` can be Off, 1, 3, or 5. YoCasts keeps that many leading Up
+Next episodes queued, preserves Pocket Casts ordering, and removes completed
+automatic downloads after they leave the configured window. Turning the setting
+off cancels automatic work that has not reached Garmin's media cache.
+
+Connect IQ audio providers cannot run an unrestricted periodic daemon.
+Automatic refresh therefore occurs when Garmin invokes the media
+`SyncDelegate`, when the app is opened and refreshes Up Next, or when the user
+selects **Settings -> Sync Now**. Garmin decides when managed Wi-Fi sync can run.
+Foreground reconnect checks also push cached progress when phone or Wi-Fi
+connectivity returns.
+
+### Details and offline data
+
+Subscription and queue data are cached. Podcast pages include descriptions;
+episode pages include metadata, playback/download state, and scrollable show
+notes. Large Pocket Casts responses are compacted by `YoCastsProxy` before they
+reach the watch.
 
 ## Project Structure
 
@@ -165,46 +234,61 @@ YoCastsGarmin/
     ├── sim/
     │   └── YoCastsApp.mc         # Simulator entry — AppBase (watch-app)
     ├── media/
-    │   ├── YoCastsContentDelegate.mc   # Media playback delegate (device only)
-    │   ├── YoCastsContentIterator.mc   # Content iterator (device only)
-    │   └── YoCastsSyncDelegate.mc      # Sync delegate (device only)
+    │   ├── YoCastsContentDelegate.mc   # Native playback callbacks
+    │   ├── YoCastsContentIterator.mc   # ActiveContent and playback ordering
+    │   └── YoCastsSyncDelegate.mc      # Managed Wi-Fi/media synchronization
     ├── models/
     │   └── DataModels.mc         # Data key constants & formatting helpers
     ├── services/
-    │   ├── IPodcastService.mc    # Service interface (abstract base class)
-    │   └── MockPodcastService.mc # Mock data implementation for development
+    │   ├── AutoSyncManager.mc          # Up Next replenishment policy
+    │   ├── CacheManager.mc             # Bounded persistent metadata caches
+    │   ├── ChangeLog.mc                # Offline mutation journal
+    │   ├── DownloadQueue.mc            # Persistent media work and metadata
+    │   ├── PlaybackState.mc            # Cross-lifecycle native state
+    │   ├── PocketCastsChangeSync.mc    # Two-way progress reconciliation
+    │   └── PocketCastsPodcastService.mc
     └── views/
-        ├── MainMenuView.mc       # Home menu delegate — routes to Queue/Podcasts/Now Playing
-        ├── LoginPromptView.mc    # Shown when no credentials are configured
-        ├── QueueView.mc          # Up Next queue list (Menu2)
-        ├── SubscribedView.mc     # Subscribed podcasts list (Menu2)
-        ├── EpisodeListView.mc    # Episodes for a specific podcast (Menu2)
-        └── NowPlayingView.mc     # Custom-drawn Now Playing screen with progress arc
+        ├── HomeMenuView.mc          # Home list and persistent playback dock
+        ├── QueueView.mc             # Up Next
+        ├── SubscribedView.mc        # Subscriptions
+        ├── PodcastDetailView.mc     # Podcast description and episode action
+        ├── EpisodeListView.mc       # Compact episode browser
+        ├── EpisodeDetailView.mc     # Playback status and episode actions
+        ├── EpisodeShowNotesView.mc  # Dedicated long-form notes reader
+        ├── DownloadsView.mc         # Download state and deletion
+        ├── NowPlayingView.mc        # Native-player status and handoff
+        └── SyncConfigurationView.mc # Native account/auto-download/sync list
 ```
 
 ### Key architectural decisions
 
 - **Dictionary-based data models** — Episode and podcast data uses `Dictionary` objects with constant keys (defined in `DataModels.mc`) rather than classes. This matches the shape of `makeWebRequest` JSON responses and minimizes memory on constrained devices.
-- **Service abstraction** — `IPodcastService` defines the data contract. `MockPodcastService` provides hardcoded data for UI development. A real `PocketCastsService` implementation will replace it.
-- **Credentials via Garmin Connect Mobile** — Users enter PocketCasts email/password through the Garmin Connect app settings, which syncs to the watch via `App.Properties`.
+- **Service abstraction** - `IPodcastService` defines the data contract.
+  `PocketCastsPodcastService` provides the live API implementation,
+  `CachedPodcastService` adds offline reads, and `MockPodcastService` remains
+  available for simulator UI work.
+- **Credentials via app properties** — Store installs use Garmin Connect
+  Mobile settings. USB-sideload tests use a matching `.SET` file copied to
+  `GARMIN\APPS\SETTINGS`.
 
 ---
 
-## Current Status
+## Hardware test matrix
 
-🟡 **In Development — Mock Data Only**
+Strict simulator and device builds pass. Download and native playback have
+already been confirmed on a physical Venu 4. Before treating a build as a
+release candidate, test:
 
-The app UI is fully functional with mock data. You can navigate subscriptions, browse episodes, view the queue, and see the Now Playing screen.
-
-**What works:**
-- Home menu with Queue, Podcasts, and Now Playing
-- Subscribed podcast browsing with episode lists
-- Up Next queue display
-- Now Playing screen with progress arc and play/pause
-- Login prompt when credentials are missing
-- Settings UI for PocketCasts credentials in Garmin Connect Mobile
-
-**Coming soon:**
-- Real Pocket Casts API integration (authentication, fetching subscriptions, queue, playback state)
-- Audio playback control
-- Background sync
+1. **Native lifecycle:** Download an episode, start it, pause, skip, change
+   tracks, reopen YoCasts, and confirm title and position follow Garmin's player.
+2. **Resume/completion:** Resume after an app/watch restart, finish an episode,
+   reconnect, and verify Pocket Casts reports it completed.
+3. **Offline reconciliation:** Play while disconnected, reconnect through the
+   phone and through Wi-Fi media sync, and confirm cached progress is pushed.
+4. **Automatic Up Next:** Set the count to 1, 3, and 5; reorder Up Next; run
+   sync; and confirm download order and replenishment. Set it Off and confirm
+   pending automatic items are cancelled.
+5. **Cleanup:** Complete an automatically downloaded episode, remove it from
+   the configured Up Next window, sync, and confirm its cached media is removed.
+6. **UX:** Scroll long podcast descriptions and show notes, inspect long titles,
+   test touch and physical buttons, and verify empty/error/download states.

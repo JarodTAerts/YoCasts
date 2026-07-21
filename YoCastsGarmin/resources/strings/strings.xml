@@ -14,4 +14,9 @@
     <string id="Loading">Loading...</string>
     <string id="Paused">Paused</string>
     <string id="Playing">Playing</string>
+    <string id="AutoDownloadTitle">Auto-download Up Next</string>
+    <string id="AutoDownloadOff">Off</string>
+    <string id="AutoDownloadOne">Keep 1 episode</string>
+    <string id="AutoDownloadThree">Keep 3 episodes</string>
+    <string id="AutoDownloadFive">Keep 5 episodes</string>
 </strings>
